@@ -164,6 +164,12 @@ button:disabled {
   overflow: auto;
 }
 
+.jobs-table {
+  margin-top: 0.4rem;
+  max-height: 220px;
+  overflow: auto;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

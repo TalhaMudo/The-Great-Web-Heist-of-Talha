@@ -200,30 +200,32 @@ export const App: React.FC = () => {
               {metrics.jobs_summary.length === 0 ? (
                 <p className="hint">No jobs yet.</p>
               ) : (
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Job ID</th>
-                      <th>Origin</th>
-                      <th>Depth</th>
-                      <th>Status</th>
-                      <th>Processed</th>
-                      <th>Created</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {metrics.jobs_summary.map((job) => (
-                      <tr key={job.id}>
-                        <td>{job.id.slice(0, 8)}…</td>
-                        <td>{job.origin_url}</td>
-                        <td>{job.max_depth}</td>
-                        <td>{job.status}</td>
-                        <td>{job.processed_urls}</td>
-                        <td>{new Date(job.created_at).toLocaleTimeString()}</td>
+                <div className="jobs-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Job ID</th>
+                        <th>Origin</th>
+                        <th>Depth</th>
+                        <th>Status</th>
+                        <th>Processed</th>
+                        <th>Created</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {metrics.jobs_summary.map((job) => (
+                        <tr key={job.id}>
+                          <td>{job.id.slice(0, 8)}…</td>
+                          <td>{job.origin_url}</td>
+                          <td>{job.max_depth}</td>
+                          <td>{job.status}</td>
+                          <td>{job.processed_urls}</td>
+                          <td>{new Date(job.created_at).toLocaleTimeString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </>
           ) : (

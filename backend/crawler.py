@@ -82,6 +82,8 @@ class CrawlerService:
         self.worker_count = worker_count
         self.jobs: Dict[str, CrawlContext] = {}
         self.global_stats = CrawlStats(queue_max=queue_maxsize)
+        # Global visited set to avoid crawling the exact same URL across jobs.
+        self.global_visited: Set[str] = set()
         self._lock = asyncio.Lock()
 
     def register_job(self, job: CrawlJob) -> None:
@@ -130,11 +132,9 @@ class CrawlerService:
                     ctx.queue.task_done()
                     continue
 
-                if url in ctx.visited:
+                if not await self._try_mark_visited(ctx, url):
                     ctx.queue.task_done()
                     continue
-
-                ctx.visited.add(url)
                 await self._respect_rate_limit(ctx)
                 html_text = await fetch_html(url)
 
@@ -147,7 +147,7 @@ class CrawlerService:
                 if html_text and depth < job.max_depth:
                     links = extract_links(url, html_text)
                     for link in links:
-                        if link in ctx.visited:
+                        if await self._already_visited(ctx, link):
                             continue
                         try:
                             ctx.queue.put_nowait((link, depth + 1, origin_url))
@@ -172,6 +172,19 @@ class CrawlerService:
                 job.status = JobStatus.COMPLETED
                 job.stats.backpressure_state = "idle"
                 self.global_stats.backpressure_state = "idle"
+
+    async def _try_mark_visited(self, ctx: CrawlContext, url: str) -> bool:
+        """Mark a URL as visited for this job and globally, returning False if it was seen before."""
+        async with self._lock:
+            if url in ctx.visited or url in self.global_visited:
+                return False
+            ctx.visited.add(url)
+            self.global_visited.add(url)
+            return True
+
+    async def _already_visited(self, ctx: CrawlContext, url: str) -> bool:
+        async with self._lock:
+            return url in ctx.visited or url in self.global_visited
 
     async def _respect_rate_limit(self, ctx: CrawlContext) -> None:
         min_interval = 1.0 / ctx.rate_limit_per_sec
