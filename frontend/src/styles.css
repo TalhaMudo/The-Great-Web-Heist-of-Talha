@@ -15,6 +15,9 @@ body {
   max-width: 1200px;
   margin: 0 auto;
   padding: 1.5rem;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .header {
@@ -34,8 +37,21 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 1.25rem;
+  flex: 1;
+  align-items: stretch;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
 }
 
 .panel {
@@ -44,6 +60,8 @@ body {
   padding: 1rem 1.25rem;
   box-shadow: 0 20px 30px rgba(0, 0, 0, 0.35);
   border: 1px solid rgba(148, 163, 184, 0.2);
+  display: flex;
+  flex-direction: column;
 }
 
 .panel h2 {
@@ -158,9 +176,14 @@ button:disabled {
   color: #e5e7eb;
 }
 
+.panel-search {
+  min-height: 0;
+}
+
 .results {
-  margin-top: 0.5rem;
-  max-height: 320px;
+  margin-top: 0.75rem;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -174,6 +197,7 @@ table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.8rem;
+  table-layout: fixed;
 }
 
 th,
@@ -192,13 +216,25 @@ td a {
   color: #a5b4fc;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 800px) {
   .app {
     padding: 0.75rem;
   }
 
   .panel {
     padding: 0.9rem;
+  }
+
+   .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    order: 1;
+  }
+
+  .main {
+    order: 2;
   }
 }
 

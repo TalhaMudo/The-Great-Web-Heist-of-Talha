@@ -77,11 +77,17 @@ class CrawlContext:
 
 
 class CrawlerService:
-    def __init__(self, queue_maxsize: int = 1000, worker_count: int = 5) -> None:
+    def __init__(
+        self,
+        queue_maxsize: int = 1000,
+        worker_count: int = 5,
+        default_rate_limit_per_sec: float = 1.0,
+    ) -> None:
         self.queue_maxsize = queue_maxsize
         self.worker_count = worker_count
         self.jobs: Dict[str, CrawlContext] = {}
         self.global_stats = CrawlStats(queue_max=queue_maxsize)
+        self.default_rate_limit_per_sec = default_rate_limit_per_sec
         # Global visited set to avoid crawling the exact same URL across jobs.
         self.global_visited: Set[str] = set()
         self._lock = asyncio.Lock()
@@ -100,9 +106,10 @@ class CrawlerService:
     def all_jobs(self) -> Dict[str, CrawlJob]:
         return {job_id: ctx.job for job_id, ctx in self.jobs.items()}
 
-    async def start_job(self, job: CrawlJob) -> None:
+    async def start_job(self, job: CrawlJob, rate_limit_per_sec: float | None = None) -> None:
         queue: "asyncio.Queue[Tuple[str, int, str]]" = asyncio.Queue(maxsize=self.queue_maxsize)
-        ctx = CrawlContext(job=job, queue=queue)
+        effective_rate = rate_limit_per_sec or self.default_rate_limit_per_sec
+        ctx = CrawlContext(job=job, queue=queue, rate_limit_per_sec=effective_rate)
         self.jobs[job.id] = ctx
 
         # Persist job metadata so it can be inspected or reloaded after restart.

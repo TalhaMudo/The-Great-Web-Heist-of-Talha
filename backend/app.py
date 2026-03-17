@@ -16,6 +16,7 @@ from .storage import init_db, load_jobs, load_pages, save_job
 class IndexRequest(BaseModel):
     origin: str
     k: int
+    rate_limit_per_sec: float | None = None
 
 
 class IndexResponse(BaseModel):
@@ -59,7 +60,7 @@ async def index(request: IndexRequest) -> IndexResponse:
         created_at=datetime.utcnow(),
         status=JobStatus.PENDING,
     )
-    await crawler_service.start_job(job)
+    await crawler_service.start_job(job, rate_limit_per_sec=request.rate_limit_per_sec)
 
     return IndexResponse(job_id=job_id)
 
