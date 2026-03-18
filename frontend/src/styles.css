@@ -185,12 +185,19 @@ button:disabled {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0.75rem;
+  background: rgba(7, 12, 26, 0.45);
 }
 
-.jobs-table {
+.jobs-list {
   margin-top: 0.4rem;
-  max-height: 220px;
+  max-height: 320px;
   overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-right: 0.2rem;
 }
 
 table {
@@ -203,17 +210,69 @@ table {
 th,
 td {
   border-bottom: 1px solid rgba(55, 65, 81, 0.8);
-  padding: 0.3rem 0.35rem;
+  padding: 0.65rem 0.7rem;
   text-align: left;
+  vertical-align: top;
 }
 
 th {
   font-weight: 600;
   color: #e5e7eb;
+  position: sticky;
+  top: 0;
+  background: rgba(15, 23, 42, 0.98);
+  z-index: 1;
 }
 
 td a {
   color: #a5b4fc;
+}
+
+.search-table th {
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}
+
+.url-cell {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.result-link {
+  display: inline-block;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.job-card {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.75rem;
+  padding: 0.8rem 0.9rem;
+  background: rgba(7, 12, 26, 0.45);
+}
+
+.job-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.45rem;
+}
+
+.job-card-url {
+  font-size: 0.82rem;
+  color: #cbd5f5;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  margin-bottom: 0.55rem;
+}
+
+.job-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+  font-size: 0.78rem;
+  color: #9ca3af;
 }
 
 @media (max-width: 800px) {

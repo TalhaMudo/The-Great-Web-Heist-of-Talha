@@ -167,31 +167,23 @@ export const App: React.FC = () => {
                 {metrics.jobs_summary.length === 0 ? (
                   <p className="hint">No jobs yet.</p>
                 ) : (
-                  <div className="jobs-table">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Job ID</th>
-                          <th>Origin</th>
-                          <th>Depth</th>
-                          <th>Status</th>
-                          <th>Processed</th>
-                          <th>Created</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {metrics.jobs_summary.map((job) => (
-                          <tr key={job.id}>
-                            <td>{job.id.slice(0, 8)}…</td>
-                            <td>{job.origin_url}</td>
-                            <td>{job.max_depth}</td>
-                            <td>{job.status}</td>
-                            <td>{job.processed_urls}</td>
-                            <td>{new Date(job.created_at).toLocaleTimeString()}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="jobs-list">
+                    {metrics.jobs_summary.map((job) => (
+                      <article className="job-card" key={job.id}>
+                        <div className="job-card-header">
+                          <strong>{job.id.slice(0, 8)}…</strong>
+                          <span className={`badge badge-${job.status === "running" ? "normal" : "idle"}`}>
+                            {job.status}
+                          </span>
+                        </div>
+                        <div className="job-card-url">{job.origin_url}</div>
+                        <div className="job-card-meta">
+                          <span>Depth: {job.max_depth}</span>
+                          <span>Processed: {job.processed_urls}</span>
+                          <span>{new Date(job.created_at).toLocaleTimeString()}</span>
+                        </div>
+                      </article>
+                    ))}
                   </div>
                 )}
               </>
@@ -220,7 +212,7 @@ export const App: React.FC = () => {
               {results.length === 0 ? (
                 <p className="hint">No results yet. Try searching after indexing.</p>
               ) : (
-                <table>
+                <table className="search-table">
                   <thead>
                     <tr>
                       <th style={{ width: "40%" }}>URL</th>
@@ -233,12 +225,12 @@ export const App: React.FC = () => {
                   <tbody>
                     {results.map((r) => (
                       <tr key={`${r.relevant_url}-${r.depth}`}>
-                        <td>
-                          <a href={r.relevant_url} target="_blank" rel="noreferrer">
+                        <td className="url-cell">
+                          <a className="result-link" href={r.relevant_url} target="_blank" rel="noreferrer">
                             {r.relevant_url}
                           </a>
                         </td>
-                        <td>{r.origin_url}</td>
+                        <td className="url-cell">{r.origin_url}</td>
                         <td>{r.depth}</td>
                         <td>{r.score?.toFixed(2)}</td>
                         <td>{r.title}</td>
