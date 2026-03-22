@@ -58,6 +58,7 @@ def summarize_jobs(jobs: Dict[str, CrawlJob]) -> List[Dict[str, object]]:
                 "processed_urls": job.stats.processed_urls,
                 "queued_urls": job.stats.queued_urls,
                 "backpressure_state": job.stats.backpressure_state,
+                "rate_limit_per_sec": job.rate_limit_per_sec,
             }
         )
     return summary

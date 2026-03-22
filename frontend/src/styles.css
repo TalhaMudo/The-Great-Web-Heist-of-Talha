@@ -35,12 +35,38 @@ body {
   color: #cbd5f5;
 }
 
+.mode-switch {
+  margin-top: 0.9rem;
+  display: inline-flex;
+  gap: 0.5rem;
+  padding: 0.25rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.65);
+}
+
+.mode-btn {
+  margin: 0;
+  padding: 0.4rem 0.85rem;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.mode-btn-active {
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+  border-color: rgba(196, 181, 253, 0.4);
+}
+
 .layout {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 1.25rem;
   flex: 1;
   align-items: stretch;
+}
+
+.layout-search {
+  grid-template-columns: 1fr;
 }
 
 .sidebar {
@@ -52,6 +78,12 @@ body {
 .main {
   display: flex;
   flex-direction: column;
+}
+
+.main-search {
+  max-width: 1100px;
+  width: 100%;
+  margin: 0 auto;
 }
 
 .panel {
@@ -80,6 +112,12 @@ body {
 .field span {
   font-size: 0.9rem;
   color: #e5e7eb;
+}
+
+.inline-control {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 input {
@@ -281,9 +319,9 @@ td a {
   border-radius: 0.75rem;
   padding: 0.8rem 0.9rem;
   background: rgba(7, 12, 26, 0.45);
-  width: 100%;
   text-align: left;
   margin: 0;
+  cursor: pointer;
 }
 
 .job-card:hover {
@@ -317,6 +355,28 @@ td a {
   gap: 0.5rem 0.9rem;
   font-size: 0.78rem;
   color: #9ca3af;
+}
+
+.job-card-controls {
+  margin-top: 0.55rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.job-card-controls label {
+  font-size: 0.76rem;
+  color: #9ca3af;
+}
+
+.job-card-controls input {
+  width: 6rem;
+  padding: 0.3rem 0.45rem;
+}
+
+.job-card-controls button {
+  margin-top: 0;
+  padding: 0.35rem 0.65rem;
 }
 
 .job-detail-header {
@@ -409,6 +469,12 @@ td a {
 
   .job-detail-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mode-switch {
+    display: flex;
+    width: 100%;
+    justify-content: center;
   }
 }
 

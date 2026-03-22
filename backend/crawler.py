@@ -91,18 +91,20 @@ class CrawlerService:
         worker_count: int = 5,
         default_rate_limit_per_sec: float = 1.0,
     ) -> None:
-        self.queue_maxsize = queue_maxsize
+        self.global_queue_limit = queue_maxsize
         self.worker_count = worker_count
         self.jobs: Dict[str, CrawlContext] = {}
         self.global_stats = CrawlStats(queue_max=queue_maxsize)
         self.default_rate_limit_per_sec = default_rate_limit_per_sec
         self._lock = asyncio.Lock()
+        self._global_queue_lock = asyncio.Lock()
+        self._global_queued_urls = 0
 
     def register_job(self, job: CrawlJob) -> None:
         if job.id in self.jobs:
             return
         visited, frontier_items = load_job_state(job.id)
-        queue: "asyncio.Queue[Tuple[str, int, str]]" = asyncio.Queue(maxsize=self.queue_maxsize)
+        queue: "asyncio.Queue[Tuple[str, int, str]]" = asyncio.Queue(maxsize=0)
         frontier: Set[str] = set()
         for item in frontier_items:
             queue.put_nowait(item)
@@ -114,7 +116,7 @@ class CrawlerService:
         if job.status == JobStatus.RUNNING:
             job.status = JobStatus.PAUSED
             job.updated_at = datetime.utcnow()
-        job.stats.queue_max = self.queue_maxsize
+        job.stats.queue_max = self.global_queue_limit
         job.stats.queued_urls = queue.qsize()
         ctx = CrawlContext(
             job=job,
@@ -125,6 +127,7 @@ class CrawlerService:
             checkpoint_ts=time.monotonic(),
         )
         self.jobs[job.id] = ctx
+        self._global_queued_urls += queue.qsize()
         if job.status == JobStatus.PAUSED:
             try:
                 save_job_state(job, visited, frontier_items)
@@ -143,7 +146,7 @@ class CrawlerService:
         return {job_id: ctx.job for job_id, ctx in self.jobs.items()}
 
     async def start_job(self, job: CrawlJob, rate_limit_per_sec: float | None = None) -> None:
-        queue: "asyncio.Queue[Tuple[str, int, str]]" = asyncio.Queue(maxsize=self.queue_maxsize)
+        queue: "asyncio.Queue[Tuple[str, int, str]]" = asyncio.Queue(maxsize=0)
         effective_rate = rate_limit_per_sec or self.default_rate_limit_per_sec
         job.rate_limit_per_sec = effective_rate
         job.status = JobStatus.RUNNING
@@ -151,7 +154,7 @@ class CrawlerService:
         self.jobs[job.id] = ctx
 
         await self._enqueue(ctx, job.origin_url, 0, job.origin_url)
-        job.stats.queue_max = self.queue_maxsize
+        job.stats.queue_max = self.global_queue_limit
         job.updated_at = datetime.utcnow()
         self._append_event(job.id, "info", "Job started", url=job.origin_url, depth=0)
         await self._persist_state(ctx, force=True)
@@ -177,6 +180,26 @@ class CrawlerService:
         await self._persist_state(ctx, force=True)
         self._update_global_stats()
         return ctx.job
+
+    async def update_job_rate_limit(self, job_id: str, rate_limit_per_sec: float) -> CrawlJob | None:
+        ctx = self.jobs.get(job_id)
+        if ctx is None:
+            return None
+        ctx.rate_limit_per_sec = rate_limit_per_sec
+        ctx.job.rate_limit_per_sec = rate_limit_per_sec
+        ctx.job.updated_at = datetime.utcnow()
+        ctx.state_dirty = True
+        self._append_event(job_id, "info", f"Rate limit updated to {rate_limit_per_sec:.2f} req/s")
+        await self._persist_state(ctx, force=True)
+        return ctx.job
+
+    async def set_global_queue_limit(self, global_queue_limit: int) -> None:
+        self.global_queue_limit = global_queue_limit
+        for ctx in self.jobs.values():
+            ctx.job.stats.queue_max = global_queue_limit
+            await self._update_queue_stats(ctx)
+            ctx.state_dirty = True
+        self._update_global_stats()
 
     async def resume_job(self, job_id: str) -> CrawlJob | None:
         ctx = self.jobs.get(job_id)
@@ -220,6 +243,7 @@ class CrawlerService:
                     continue
 
                 ctx.frontier.discard(url)
+                await self._mark_global_dequeue()
                 if depth > job.max_depth:
                     ctx.queue.task_done()
                     continue
@@ -300,9 +324,9 @@ class CrawlerService:
     async def _update_queue_stats(self, ctx: CrawlContext) -> None:
         size = ctx.queue.qsize()
         ctx.job.stats.queued_urls = size
-        if size >= self.queue_maxsize:
+        if self._global_queued_urls >= self.global_queue_limit:
             ctx.job.stats.backpressure_state = "queue_full"
-        elif size > max(1, int(self.queue_maxsize * 0.8)):
+        elif self._global_queued_urls > max(1, int(self.global_queue_limit * 0.8)):
             ctx.job.stats.backpressure_state = "high"
         else:
             ctx.job.stats.backpressure_state = "normal"
@@ -317,13 +341,20 @@ class CrawlerService:
             if ctx.stop_requested or ctx.job.status != JobStatus.RUNNING:
                 return False
             try:
-                await asyncio.wait_for(ctx.queue.put((url, depth, origin_url)), timeout=0.5)
+                reserved = await self._try_reserve_global_queue_slot()
+                if not reserved:
+                    ctx.job.stats.backpressure_state = "queue_full"
+                    self._update_global_stats()
+                    await asyncio.sleep(0.1)
+                    continue
+                ctx.queue.put_nowait((url, depth, origin_url))
                 ctx.frontier.add(url)
                 ctx.job.stats.discovered_urls += 1
                 ctx.state_dirty = True
                 await self._update_queue_stats(ctx)
                 return True
-            except asyncio.TimeoutError:
+            except asyncio.QueueFull:
+                await self._mark_global_dequeue()
                 ctx.job.stats.backpressure_state = "queue_full"
                 self._update_global_stats()
                 await asyncio.sleep(0)
@@ -341,7 +372,7 @@ class CrawlerService:
         if not force and not ctx.state_dirty:
             return
         ctx.job.stats.queued_urls = ctx.queue.qsize()
-        ctx.job.stats.queue_max = self.queue_maxsize
+        ctx.job.stats.queue_max = self.global_queue_limit
         ctx.job.updated_at = datetime.utcnow()
         queue_items: Deque[Tuple[str, int, str]] = getattr(ctx.queue, "_queue", deque())
         frontier_items = list(queue_items)
@@ -358,7 +389,7 @@ class CrawlerService:
             logger.debug("Failed to append event for job %s", job_id)
 
     def _update_global_stats(self) -> None:
-        stats = CrawlStats(queue_max=self.queue_maxsize)
+        stats = CrawlStats(queue_max=self.global_queue_limit)
         backpressure_levels: List[str] = []
         for ctx in self.jobs.values():
             stats.processed_urls += ctx.job.stats.processed_urls
@@ -376,7 +407,19 @@ class CrawlerService:
             stats.backpressure_state = "normal"
         else:
             stats.backpressure_state = "idle"
+        stats.queued_urls = self._global_queued_urls
         self.global_stats = stats
+
+    async def _try_reserve_global_queue_slot(self) -> bool:
+        async with self._global_queue_lock:
+            if self._global_queued_urls >= self.global_queue_limit:
+                return False
+            self._global_queued_urls += 1
+            return True
+
+    async def _mark_global_dequeue(self) -> None:
+        async with self._global_queue_lock:
+            self._global_queued_urls = max(0, self._global_queued_urls - 1)
 
 
 crawler_service = CrawlerService()

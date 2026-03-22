@@ -10,6 +10,7 @@ type JobSummary = {
   processed_urls: number;
   queued_urls: number;
   backpressure_state: string;
+  rate_limit_per_sec: number;
 };
 
 type JobEvent = {
@@ -70,6 +71,7 @@ type SearchResult = {
 };
 
 export const App: React.FC = () => {
+  const [viewMode, setViewMode] = useState<"crawler" | "search">("crawler");
   const [origin, setOrigin] = useState("");
   const [depth, setDepth] = useState(2);
   const [rateLimit, setRateLimit] = useState(1.0);
@@ -82,6 +84,8 @@ export const App: React.FC = () => {
   const [isIndexing, setIsIndexing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isMutatingJob, setIsMutatingJob] = useState(false);
+  const [globalQueueLimitInput, setGlobalQueueLimitInput] = useState("1000");
+  const [jobRateInputs, setJobRateInputs] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const fetchMetrics = () => {
@@ -89,6 +93,16 @@ export const App: React.FC = () => {
         .then((res) => res.json())
         .then((data: Metrics) => {
           setMetrics(data);
+          setGlobalQueueLimitInput(String(data.queue_max));
+          setJobRateInputs((prev) => {
+            const next = { ...prev };
+            for (const job of data.jobs_summary) {
+              if (!next[job.id]) {
+                next[job.id] = String(job.rate_limit_per_sec);
+              }
+            }
+            return next;
+          });
           if (!selectedJobId && data.jobs_summary.length > 0) {
             setSelectedJobId(data.jobs_summary[0].id);
           }
@@ -158,6 +172,26 @@ export const App: React.FC = () => {
     }
   };
 
+  const runFeelingLucky = async () => {
+    setError(null);
+    try {
+      const res = await fetch(`/search?query=${encodeURIComponent(query)}`);
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail ?? "Search failed");
+      }
+      const data = await res.json();
+      const nextResults: SearchResult[] = data.results ?? [];
+      setResults(nextResults);
+      if (nextResults.length === 0 || !nextResults[0].relevant_url) {
+        throw new Error("No results found for this query.");
+      }
+      window.open(nextResults[0].relevant_url, "_blank", "noopener,noreferrer");
+    } catch (e: any) {
+      setError(e.message ?? String(e));
+    }
+  };
+
   const mutateJob = async (action: "pause" | "resume") => {
     if (!selectedJobId) {
       return;
@@ -179,17 +213,88 @@ export const App: React.FC = () => {
     }
   };
 
+  const searchPanel = (
+    <section className="panel panel-search">
+      <h2>Search</h2>
+      <label className="field">
+        <span>Query</span>
+        <input
+          type="text"
+          placeholder="search terms"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </label>
+      <button onClick={runSearch} disabled={!query}>
+        Search Indexed Pages
+      </button>
+      <button onClick={runFeelingLucky} disabled={!query}>
+        I'm Feeling Lucky
+      </button>
+      <div className="results">
+        {results.length === 0 ? (
+          <p className="hint">No results yet. Try searching after indexing.</p>
+        ) : (
+          <table className="search-table">
+            <thead>
+              <tr>
+                <th style={{ width: "40%" }}>URL</th>
+                <th style={{ width: "25%" }}>Origin</th>
+                <th style={{ width: "8%" }}>Depth</th>
+                <th style={{ width: "10%" }}>Score</th>
+                <th style={{ width: "17%" }}>Title</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map((r) => (
+                <tr key={`${r.relevant_url}-${r.depth}`}>
+                  <td className="url-cell">
+                    <a className="result-link" href={r.relevant_url} target="_blank" rel="noreferrer">
+                      {r.relevant_url}
+                    </a>
+                  </td>
+                  <td className="url-cell">{r.origin_url}</td>
+                  <td>{r.depth}</td>
+                  <td>{r.score?.toFixed(2)}</td>
+                  <td>{r.title}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </section>
+  );
+
   return (
     <div className="app">
       <header className="header">
         <h1>The Great Web Heist of Talha</h1>
         <p>AI-assisted crawler and live search dashboard</p>
+        <div className="mode-switch" role="tablist" aria-label="Application mode">
+          <button
+            className={`mode-btn ${viewMode === "crawler" ? "mode-btn-active" : ""}`}
+            onClick={() => setViewMode("crawler")}
+            role="tab"
+            aria-selected={viewMode === "crawler"}
+          >
+            Crawler Mode
+          </button>
+          <button
+            className={`mode-btn ${viewMode === "search" ? "mode-btn-active" : ""}`}
+            onClick={() => setViewMode("search")}
+            role="tab"
+            aria-selected={viewMode === "search"}
+          >
+            Search Mode
+          </button>
+        </div>
       </header>
 
       {error && <div className="error-banner">{error}</div>}
 
-      <main className="layout">
-        <div className="sidebar">
+      <main className={`layout ${viewMode === "search" ? "layout-search" : ""}`}>
+        {viewMode === "crawler" && <div className="sidebar">
           <section className="panel">
             <h2>Index Control</h2>
             <label className="field">
@@ -213,12 +318,11 @@ export const App: React.FC = () => {
             </label>
             <label className="field">
               <span>
-                Crawl speed (requests/sec): <strong>{rateLimit.toFixed(1)}</strong>
+                Crawler Speed (req/s)
               </span>
               <input
-                type="range"
-                min={0.2}
-                max={3}
+                type="number"
+                min={0.1}
                 step={0.1}
                 value={rateLimit}
                 onChange={(e) => setRateLimit(Number(e.target.value))}
@@ -232,6 +336,40 @@ export const App: React.FC = () => {
 
           <section className="panel">
             <h2>System Dashboard</h2>
+            <label className="field">
+              <span>Global Queue Limit (all jobs combined)</span>
+              <div className="inline-control">
+                <input
+                  type="number"
+                  min={1}
+                  value={globalQueueLimitInput}
+                  onChange={(e) => setGlobalQueueLimitInput(e.target.value)}
+                />
+                <button
+                  onClick={async () => {
+                    setError(null);
+                    try {
+                      const val = Number(globalQueueLimitInput);
+                      const res = await fetch("/settings/queue-limit", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ global_queue_limit: val }),
+                      });
+                      if (!res.ok) {
+                        const data = await res.json();
+                        throw new Error(data.detail ?? "Failed to update global queue limit");
+                      }
+                      const data = await res.json();
+                      setMetrics(data);
+                    } catch (e: any) {
+                      setError(e.message ?? String(e));
+                    }
+                  }}
+                >
+                  Apply
+                </button>
+              </div>
+            </label>
             {metrics ? (
               <>
                 <div className="metrics-grid">
@@ -274,10 +412,17 @@ export const App: React.FC = () => {
                 ) : (
                   <div className="jobs-list">
                     {metrics.jobs_summary.map((job) => (
-                      <button
+                      <article
                         className={`job-card ${selectedJobId === job.id ? "job-card-selected" : ""}`}
                         key={job.id}
                         onClick={() => setSelectedJobId(job.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            setSelectedJobId(job.id);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
                       >
                         <div className="job-card-header">
                           <strong>{job.id.slice(0, 8)}…</strong>
@@ -292,7 +437,50 @@ export const App: React.FC = () => {
                           <span>Queue: {job.queued_urls}</span>
                           <span>{new Date(job.updated_at).toLocaleTimeString()}</span>
                         </div>
-                      </button>
+                        <div className="job-card-controls">
+                          <label>Req/s</label>
+                          <input
+                            type="number"
+                            min={0.1}
+                            step={0.1}
+                            value={jobRateInputs[job.id] ?? String(job.rate_limit_per_sec)}
+                            onChange={(e) =>
+                              setJobRateInputs((prev) => ({
+                                ...prev,
+                                [job.id]: e.target.value,
+                              }))
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              setError(null);
+                              try {
+                                const val = Number(jobRateInputs[job.id] ?? job.rate_limit_per_sec);
+                                const res = await fetch(`/jobs/${job.id}/rate-limit`, {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ rate_limit_per_sec: val }),
+                                });
+                                if (!res.ok) {
+                                  const data = await res.json();
+                                  throw new Error(data.detail ?? "Failed to update job rate");
+                                }
+                                const data = await res.json();
+                                setJobRateInputs((prev) => ({ ...prev, [job.id]: String(val) }));
+                                if (selectedJobId === job.id) {
+                                  setSelectedJob(data);
+                                }
+                              } catch (err: any) {
+                                setError(err.message ?? String(err));
+                              }
+                            }}
+                          >
+                            Set
+                          </button>
+                        </div>
+                      </article>
                     ))}
                   </div>
                 )}
@@ -301,10 +489,10 @@ export const App: React.FC = () => {
               <p className="hint">Waiting for metrics from backend…</p>
             )}
           </section>
-        </div>
+        </div>}
 
-        <div className="main">
-          <section className="panel panel-job-detail">
+        <div className={`main ${viewMode === "search" ? "main-search" : ""}`}>
+          {viewMode === "crawler" && <section className="panel panel-job-detail">
             <h2>Job Detail</h2>
             {!selectedJob ? (
               <p className="hint">Select a job to inspect its live state and control it.</p>
@@ -393,55 +581,9 @@ export const App: React.FC = () => {
                 )}
               </>
             )}
-          </section>
+          </section>}
 
-          <section className="panel panel-search">
-            <h2>Search</h2>
-            <label className="field">
-              <span>Query</span>
-              <input
-                type="text"
-                placeholder="search terms"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </label>
-            <button onClick={runSearch} disabled={!query}>
-              Search Indexed Pages
-            </button>
-            <div className="results">
-              {results.length === 0 ? (
-                <p className="hint">No results yet. Try searching after indexing.</p>
-              ) : (
-                <table className="search-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: "40%" }}>URL</th>
-                      <th style={{ width: "25%" }}>Origin</th>
-                      <th style={{ width: "8%" }}>Depth</th>
-                      <th style={{ width: "10%" }}>Score</th>
-                      <th style={{ width: "17%" }}>Title</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.map((r) => (
-                      <tr key={`${r.relevant_url}-${r.depth}`}>
-                        <td className="url-cell">
-                          <a className="result-link" href={r.relevant_url} target="_blank" rel="noreferrer">
-                            {r.relevant_url}
-                          </a>
-                        </td>
-                        <td className="url-cell">{r.origin_url}</td>
-                        <td>{r.depth}</td>
-                        <td>{r.score?.toFixed(2)}</td>
-                        <td>{r.title}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </section>
+          {viewMode === "search" && searchPanel}
         </div>
       </main>
     </div>

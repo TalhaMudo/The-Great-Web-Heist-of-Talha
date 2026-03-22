@@ -1,0 +1,19 @@
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# Local crawler database and SQLite artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.db-*
+
+# Frontend build outputs
+frontend/dist/
+
+# OS/editor noise
+.DS_Store

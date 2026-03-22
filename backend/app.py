@@ -60,6 +60,14 @@ class JobDetailResponse(BaseModel):
     recent_events: List[JobEventResponse]
 
 
+class GlobalQueueLimitRequest(BaseModel):
+    global_queue_limit: int
+
+
+class JobRateLimitRequest(BaseModel):
+    rate_limit_per_sec: float
+
+
 class MetricsResponse(BaseModel):
     processed_urls: int
     discovered_urls: int
@@ -173,6 +181,24 @@ async def resume_job(job_id: str) -> JobDetailResponse:
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return _serialize_job(job.id)
+
+
+@app.post("/jobs/{job_id}/rate-limit", response_model=JobDetailResponse)
+async def update_job_rate_limit(job_id: str, request: JobRateLimitRequest) -> JobDetailResponse:
+    if request.rate_limit_per_sec <= 0:
+        raise HTTPException(status_code=400, detail="rate_limit_per_sec must be positive")
+    job = await crawler_service.update_job_rate_limit(job_id, request.rate_limit_per_sec)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _serialize_job(job.id)
+
+
+@app.post("/settings/queue-limit", response_model=MetricsResponse)
+async def update_global_queue_limit(request: GlobalQueueLimitRequest) -> MetricsResponse:
+    if request.global_queue_limit <= 0:
+        raise HTTPException(status_code=400, detail="global_queue_limit must be positive")
+    await crawler_service.set_global_queue_limit(request.global_queue_limit)
+    return await metrics()
 
 
 @app.get("/metrics", response_model=MetricsResponse)
