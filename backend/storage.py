@@ -35,6 +35,7 @@ def init_db() -> None:
                 id TEXT PRIMARY KEY,
                 origin_url TEXT NOT NULL,
                 max_depth INTEGER NOT NULL,
+                max_urls_to_visit INTEGER,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -52,6 +53,7 @@ def init_db() -> None:
             """
         )
         _add_column_if_missing(cur, "jobs", "updated_at", "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(cur, "jobs", "max_urls_to_visit", "INTEGER")
         _add_column_if_missing(cur, "jobs", "rate_limit_per_sec", "REAL NOT NULL DEFAULT 1.0")
         _add_column_if_missing(cur, "jobs", "error_message", "TEXT")
         _add_column_if_missing(cur, "jobs", "processed_urls", "INTEGER NOT NULL DEFAULT 0")
@@ -168,6 +170,7 @@ def _upsert_job(cur: sqlite3.Cursor, job: CrawlJob) -> None:
             id,
             origin_url,
             max_depth,
+            max_urls_to_visit,
             created_at,
             updated_at,
             status,
@@ -182,12 +185,13 @@ def _upsert_job(cur: sqlite3.Cursor, job: CrawlJob) -> None:
             active_workers,
             backpressure_state
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             job.id,
             job.origin_url,
             job.max_depth,
+            job.max_urls_to_visit,
             job.created_at.isoformat(),
             job.updated_at.isoformat(),
             job.status.value,
@@ -293,6 +297,7 @@ def load_jobs() -> List[CrawlJob]:
                 id,
                 origin_url,
                 max_depth,
+                max_urls_to_visit,
                 created_at,
                 updated_at,
                 status,
@@ -315,6 +320,7 @@ def load_jobs() -> List[CrawlJob]:
             job_id,
             origin_url,
             max_depth,
+            max_urls_to_visit,
             created_at,
             updated_at,
             status,
@@ -335,6 +341,7 @@ def load_jobs() -> List[CrawlJob]:
                     origin_url=str(origin_url),
                     max_depth=int(max_depth),
                     created_at=datetime.fromisoformat(str(created_at)),
+                    max_urls_to_visit=int(max_urls_to_visit) if max_urls_to_visit is not None else None,
                     status=JobStatus(str(status)),
                     rate_limit_per_sec=float(rate_limit_per_sec or 1.0),
                     error_message=str(error_message) if error_message is not None else None,

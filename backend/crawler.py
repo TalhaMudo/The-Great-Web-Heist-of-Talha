@@ -82,6 +82,7 @@ class CrawlContext:
     state_dirty: bool = False
     checkpoint_counter: int = 0
     checkpoint_ts: float = 0.0
+    max_reached_notified: bool = False
 
 
 class CrawlerService:
@@ -302,6 +303,15 @@ class CrawlerService:
 
     async def _try_mark_visited(self, ctx: CrawlContext, url: str, depth: int) -> bool:
         async with self._lock:
+            if ctx.job.max_urls_to_visit is not None and len(ctx.visited) >= ctx.job.max_urls_to_visit:
+                if not ctx.max_reached_notified:
+                    self._append_event(
+                        ctx.job.id,
+                        "info",
+                        f"Max URLs reached ({ctx.job.max_urls_to_visit}); skipping remaining queue entries",
+                    )
+                    ctx.max_reached_notified = True
+                return False
             if url in ctx.visited:
                 self._append_event(ctx.job.id, "debug", "Skipped already-visited URL", url=url, depth=depth)
                 return False
@@ -337,6 +347,8 @@ class CrawlerService:
             return False
         if await self._already_visited(ctx, url):
             return False
+        if not await self._can_add_more_urls(ctx):
+            return False
         while True:
             if ctx.stop_requested or ctx.job.status != JobStatus.RUNNING:
                 return False
@@ -358,6 +370,12 @@ class CrawlerService:
                 ctx.job.stats.backpressure_state = "queue_full"
                 self._update_global_stats()
                 await asyncio.sleep(0)
+
+    async def _can_add_more_urls(self, ctx: CrawlContext) -> bool:
+        if ctx.job.max_urls_to_visit is None:
+            return True
+        async with self._lock:
+            return (len(ctx.visited) + len(ctx.frontier)) < ctx.job.max_urls_to_visit
 
     async def _maybe_checkpoint(self, ctx: CrawlContext) -> None:
         if not ctx.state_dirty:

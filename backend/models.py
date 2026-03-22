@@ -33,6 +33,7 @@ class CrawlJob:
     origin_url: str
     max_depth: int
     created_at: datetime
+    max_urls_to_visit: int | None = None
     rate_limit_per_sec: float = 1.0
     status: JobStatus = JobStatus.PENDING
     error_message: Optional[str] = None
@@ -52,6 +53,7 @@ def summarize_jobs(jobs: Dict[str, CrawlJob]) -> List[Dict[str, object]]:
                 "id": job.id,
                 "origin_url": job.origin_url,
                 "max_depth": job.max_depth,
+                "max_urls_to_visit": job.max_urls_to_visit,
                 "created_at": job.created_at.isoformat(),
                 "updated_at": job.updated_at.isoformat(),
                 "status": job.status.value,

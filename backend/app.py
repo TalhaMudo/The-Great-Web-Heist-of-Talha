@@ -17,6 +17,7 @@ from .storage import init_db, load_job_events, load_jobs, load_pages
 class IndexRequest(BaseModel):
     origin: str
     k: int
+    max_urls_to_visit: int | None = None
     rate_limit_per_sec: float | None = None
 
 
@@ -48,6 +49,7 @@ class JobDetailResponse(BaseModel):
     id: str
     origin_url: str
     max_depth: int
+    max_urls_to_visit: int | None = None
     created_at: str
     updated_at: str
     status: str
@@ -87,12 +89,15 @@ app = FastAPI(title="The Great Web Heist of Talha")
 async def index(request: IndexRequest) -> IndexResponse:
     if request.k < 0:
         raise HTTPException(status_code=400, detail="k must be non-negative")
+    if request.max_urls_to_visit is not None and request.max_urls_to_visit <= 0:
+        raise HTTPException(status_code=400, detail="max_urls_to_visit must be positive")
 
     job_id = str(uuid.uuid4())
     job = CrawlJob(
         id=job_id,
         origin_url=request.origin,
         max_depth=request.k,
+        max_urls_to_visit=request.max_urls_to_visit,
         created_at=datetime.utcnow(),
         status=JobStatus.PENDING,
     )
@@ -140,6 +145,7 @@ def _serialize_job(job_id: str) -> JobDetailResponse:
         id=job.id,
         origin_url=job.origin_url,
         max_depth=job.max_depth,
+        max_urls_to_visit=job.max_urls_to_visit,
         created_at=job.created_at.isoformat(),
         updated_at=job.updated_at.isoformat(),
         status=job.status.value,

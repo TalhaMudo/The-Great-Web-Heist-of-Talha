@@ -4,6 +4,7 @@ type JobSummary = {
   id: string;
   origin_url: string;
   max_depth: number;
+  max_urls_to_visit?: number | null;
   created_at: string;
   updated_at: string;
   status: string;
@@ -25,6 +26,7 @@ type JobDetail = {
   id: string;
   origin_url: string;
   max_depth: number;
+  max_urls_to_visit?: number | null;
   created_at: string;
   updated_at: string;
   status: string;
@@ -74,6 +76,7 @@ export const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<"crawler" | "search">("crawler");
   const [origin, setOrigin] = useState("");
   const [depth, setDepth] = useState(2);
+  const [maxUrlsToVisit, setMaxUrlsToVisit] = useState("500");
   const [rateLimit, setRateLimit] = useState(1.0);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -141,7 +144,12 @@ export const App: React.FC = () => {
       const res = await fetch("/index", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ origin, k: depth, rate_limit_per_sec: rateLimit })
+        body: JSON.stringify({
+          origin,
+          k: depth,
+          max_urls_to_visit: maxUrlsToVisit ? Number(maxUrlsToVisit) : null,
+          rate_limit_per_sec: rateLimit,
+        }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -219,23 +227,34 @@ export const App: React.FC = () => {
   };
 
   const searchPanel = (
-    <section className="panel panel-search">
-      <h2>Search</h2>
+    <section className="panel panel-search panel-search-upgraded">
+      <div className="search-header">
+        <h2>
+          <span className="search-icon" aria-hidden="true">
+            🔎
+          </span>{" "}
+          Search
+        </h2>
+        <p className="search-subtitle">Find relevant URLs in pages already indexed by active or finished crawlers.</p>
+      </div>
       <label className="field">
         <span>Query</span>
         <input
+          className="search-input"
           type="text"
           placeholder="search terms"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
       </label>
-      <button onClick={runSearch} disabled={!query}>
-        Search Indexed Pages
-      </button>
-      <button onClick={runFeelingLucky} disabled={!query}>
-        I'm Feeling Lucky
-      </button>
+      <div className="search-actions">
+        <button onClick={runSearch} disabled={!query}>
+          Search Indexed Pages
+        </button>
+        <button className="button-secondary" onClick={runFeelingLucky} disabled={!query}>
+          I'm Feeling Lucky
+        </button>
+      </div>
       <div className="results">
         {results.length === 0 ? (
           <p className="hint">No results yet. Try searching after indexing.</p>
@@ -319,6 +338,15 @@ export const App: React.FC = () => {
                 max={8}
                 value={depth}
                 onChange={(e) => setDepth(Number(e.target.value))}
+              />
+            </label>
+            <label className="field">
+              <span>Max URLs to Visit</span>
+              <input
+                type="number"
+                min={1}
+                value={maxUrlsToVisit}
+                onChange={(e) => setMaxUrlsToVisit(e.target.value)}
               />
             </label>
             <label className="field">
@@ -438,6 +466,7 @@ export const App: React.FC = () => {
                         <div className="job-card-url">{job.origin_url}</div>
                         <div className="job-card-meta">
                           <span>Depth: {job.max_depth}</span>
+                          <span>Max URLs: {job.max_urls_to_visit ?? "unbounded"}</span>
                           <span>Processed: {job.processed_urls}</span>
                           <span>Queue: {job.queued_urls}</span>
                           <span>{new Date(job.updated_at).toLocaleTimeString()}</span>
@@ -534,6 +563,10 @@ export const App: React.FC = () => {
                   <div className="metric">
                     <span className="label">Rate Limit</span>
                     <span className="value">{selectedJob.rate_limit_per_sec.toFixed(1)} req/s</span>
+                  </div>
+                  <div className="metric">
+                    <span className="label">Max URLs</span>
+                    <span className="value">{selectedJob.max_urls_to_visit ?? "unbounded"}</span>
                   </div>
                   <div className="metric">
                     <span className="label">Visited</span>
