@@ -9,13 +9,18 @@ from typing import Dict, List, Optional, Tuple
 class JobStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
+    PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass
 class CrawlStats:
     processed_urls: int = 0
+    discovered_urls: int = 0
+    duplicate_urls: int = 0
+    failed_urls: int = 0
     queued_urls: int = 0
     queue_max: int = 0
     active_workers: int = 0
@@ -28,8 +33,10 @@ class CrawlJob:
     origin_url: str
     max_depth: int
     created_at: datetime
+    rate_limit_per_sec: float = 1.0
     status: JobStatus = JobStatus.PENDING
     error_message: Optional[str] = None
+    updated_at: datetime = field(default_factory=datetime.utcnow)
     stats: CrawlStats = field(default_factory=CrawlStats)
 
 
@@ -46,8 +53,11 @@ def summarize_jobs(jobs: Dict[str, CrawlJob]) -> List[Dict[str, object]]:
                 "origin_url": job.origin_url,
                 "max_depth": job.max_depth,
                 "created_at": job.created_at.isoformat(),
+                "updated_at": job.updated_at.isoformat(),
                 "status": job.status.value,
                 "processed_urls": job.stats.processed_urls,
+                "queued_urls": job.stats.queued_urls,
+                "backpressure_state": job.stats.backpressure_state,
             }
         )
     return summary

@@ -114,7 +114,7 @@ class IndexService:
             score = float(count)
             self.inverted[token].append((url, origin_url, depth, score))
 
-    def search(self, query: str, limit: int = 50) -> List[Tuple[str, str, int, float, str]]:
+    def search(self, query: str, limit: int | None = None) -> List[Tuple[str, str, int, float, str]]:
         tokens = tokenize(query)
         if not tokens:
             return []
@@ -129,7 +129,9 @@ class IndexService:
                     title = self.pages.get(url).title if url in self.pages else ""
                     meta[url] = (origin_url, depth, title)
 
-        ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)[:limit]
+        ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+        if limit is not None:
+            ranked = ranked[:limit]
         results: List[Tuple[str, str, int, float, str]] = []
         for url, score in ranked:
             origin_url, depth, title = meta.get(url, ("", 0, ""))

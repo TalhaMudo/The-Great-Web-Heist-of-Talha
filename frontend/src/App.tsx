@@ -5,12 +5,55 @@ type JobSummary = {
   origin_url: string;
   max_depth: number;
   created_at: string;
+  updated_at: string;
   status: string;
   processed_urls: number;
+  queued_urls: number;
+  backpressure_state: string;
+};
+
+type JobEvent = {
+  created_at: string;
+  level: string;
+  message: string;
+  url?: string | null;
+  depth?: number | null;
+};
+
+type JobDetail = {
+  id: string;
+  origin_url: string;
+  max_depth: number;
+  created_at: string;
+  updated_at: string;
+  status: string;
+  error_message?: string | null;
+  rate_limit_per_sec: number;
+  stats: {
+    processed_urls: number;
+    discovered_urls: number;
+    duplicate_urls: number;
+    failed_urls: number;
+    queued_urls: number;
+    queue_max: number;
+    active_workers: number;
+    backpressure_state: string;
+  };
+  visited_count: number;
+  frontier_count: number;
+  frontier_preview: Array<{
+    url: string;
+    depth: number;
+    origin_url: string;
+  }>;
+  recent_events: JobEvent[];
 };
 
 type Metrics = {
   processed_urls: number;
+  discovered_urls: number;
+  duplicate_urls: number;
+  failed_urls: number;
   queued_urls: number;
   queue_max: number;
   backpressure_state: string;
@@ -31,23 +74,51 @@ export const App: React.FC = () => {
   const [depth, setDepth] = useState(2);
   const [rateLimit, setRateLimit] = useState(1.0);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedJob, setSelectedJob] = useState<JobDetail | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isIndexing, setIsIndexing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isMutatingJob, setIsMutatingJob] = useState(false);
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    const fetchMetrics = () => {
       fetch("/metrics")
         .then((res) => res.json())
-        .then((data: Metrics) => setMetrics(data))
+        .then((data: Metrics) => {
+          setMetrics(data);
+          if (!selectedJobId && data.jobs_summary.length > 0) {
+            setSelectedJobId(data.jobs_summary[0].id);
+          }
+        })
         .catch(() => {
           /* ignore */
         });
-    }, 2000);
+    };
+    fetchMetrics();
+    const interval = setInterval(fetchMetrics, 2000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedJobId]);
+
+  useEffect(() => {
+    if (!selectedJobId) {
+      setSelectedJob(null);
+      return;
+    }
+    const fetchJob = () => {
+      fetch(`/jobs/${selectedJobId}`)
+        .then((res) => res.json())
+        .then((data: JobDetail) => setSelectedJob(data))
+        .catch(() => {
+          /* ignore */
+        });
+    };
+    fetchJob();
+    const interval = setInterval(fetchJob, 2000);
+    return () => clearInterval(interval);
+  }, [selectedJobId]);
 
   const startIndex = async () => {
     setError(null);
@@ -64,6 +135,7 @@ export const App: React.FC = () => {
       }
       const data = await res.json();
       setCurrentJobId(data.job_id);
+      setSelectedJobId(data.job_id);
     } catch (e: any) {
       setError(e.message ?? String(e));
     } finally {
@@ -83,6 +155,27 @@ export const App: React.FC = () => {
       setResults(data.results ?? []);
     } catch (e: any) {
       setError(e.message ?? String(e));
+    }
+  };
+
+  const mutateJob = async (action: "pause" | "resume") => {
+    if (!selectedJobId) {
+      return;
+    }
+    setError(null);
+    try {
+      setIsMutatingJob(true);
+      const res = await fetch(`/jobs/${selectedJobId}/${action}`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail ?? `Failed to ${action} job`);
+      }
+      const data = await res.json();
+      setSelectedJob(data);
+    } catch (e: any) {
+      setError(e.message ?? String(e));
+    } finally {
+      setIsMutatingJob(false);
     }
   };
 
@@ -147,6 +240,18 @@ export const App: React.FC = () => {
                     <span className="value">{metrics.processed_urls}</span>
                   </div>
                   <div className="metric">
+                    <span className="label">Discovered URLs</span>
+                    <span className="value">{metrics.discovered_urls}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="label">Duplicates Skipped</span>
+                    <span className="value">{metrics.duplicate_urls}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="label">Failed Fetches</span>
+                    <span className="value">{metrics.failed_urls}</span>
+                  </div>
+                  <div className="metric">
                     <span className="label">Queue depth</span>
                     <span className="value">
                       {metrics.queued_urls} / {metrics.queue_max}
@@ -169,10 +274,14 @@ export const App: React.FC = () => {
                 ) : (
                   <div className="jobs-list">
                     {metrics.jobs_summary.map((job) => (
-                      <article className="job-card" key={job.id}>
+                      <button
+                        className={`job-card ${selectedJobId === job.id ? "job-card-selected" : ""}`}
+                        key={job.id}
+                        onClick={() => setSelectedJobId(job.id)}
+                      >
                         <div className="job-card-header">
                           <strong>{job.id.slice(0, 8)}…</strong>
-                          <span className={`badge badge-${job.status === "running" ? "normal" : "idle"}`}>
+                          <span className={`badge badge-${job.status}`}>
                             {job.status}
                           </span>
                         </div>
@@ -180,9 +289,10 @@ export const App: React.FC = () => {
                         <div className="job-card-meta">
                           <span>Depth: {job.max_depth}</span>
                           <span>Processed: {job.processed_urls}</span>
-                          <span>{new Date(job.created_at).toLocaleTimeString()}</span>
+                          <span>Queue: {job.queued_urls}</span>
+                          <span>{new Date(job.updated_at).toLocaleTimeString()}</span>
                         </div>
-                      </article>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -194,6 +304,97 @@ export const App: React.FC = () => {
         </div>
 
         <div className="main">
+          <section className="panel panel-job-detail">
+            <h2>Job Detail</h2>
+            {!selectedJob ? (
+              <p className="hint">Select a job to inspect its live state and control it.</p>
+            ) : (
+              <>
+                <div className="job-detail-header">
+                  <div>
+                    <div className="hint">Job ID</div>
+                    <code>{selectedJob.id}</code>
+                  </div>
+                  <span className={`badge badge-${selectedJob.status}`}>
+                    {selectedJob.status}
+                  </span>
+                </div>
+                <div className="job-actions">
+                  <button
+                    onClick={() => mutateJob("pause")}
+                    disabled={selectedJob.status !== "running" || isMutatingJob}
+                  >
+                    Pause Job
+                  </button>
+                  <button
+                    onClick={() => mutateJob("resume")}
+                    disabled={selectedJob.status !== "paused" || isMutatingJob}
+                  >
+                    Resume Job
+                  </button>
+                </div>
+                <div className="job-detail-grid">
+                  <div className="metric">
+                    <span className="label">Origin</span>
+                    <span className="value">{selectedJob.origin_url}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="label">Rate Limit</span>
+                    <span className="value">{selectedJob.rate_limit_per_sec.toFixed(1)} req/s</span>
+                  </div>
+                  <div className="metric">
+                    <span className="label">Visited</span>
+                    <span className="value">{selectedJob.visited_count}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="label">Frontier</span>
+                    <span className="value">{selectedJob.frontier_count}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="label">Processed</span>
+                    <span className="value">{selectedJob.stats.processed_urls}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="label">Backpressure</span>
+                    <span className={`badge badge-${selectedJob.stats.backpressure_state}`}>
+                      {selectedJob.stats.backpressure_state}
+                    </span>
+                  </div>
+                </div>
+                <h3>Frontier Preview</h3>
+                {selectedJob.frontier_preview.length === 0 ? (
+                  <p className="hint">No queued URLs.</p>
+                ) : (
+                  <div className="job-frontier">
+                    {selectedJob.frontier_preview.map((item) => (
+                      <div className="frontier-row" key={`${item.url}-${item.depth}`}>
+                        <span className="frontier-depth">d={item.depth}</span>
+                        <span className="frontier-url">{item.url}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <h3>Recent Events</h3>
+                {selectedJob.recent_events.length === 0 ? (
+                  <p className="hint">No events yet.</p>
+                ) : (
+                  <div className="job-events">
+                    {selectedJob.recent_events.map((event, idx) => (
+                      <div className="event-row" key={`${event.created_at}-${idx}`}>
+                        <span className={`badge badge-${event.level === "error" ? "queue_full" : "normal"}`}>
+                          {event.level}
+                        </span>
+                        <span className="event-message">{event.message}</span>
+                        {event.url && <span className="event-url">{event.url}</span>}
+                        <span className="hint">{new Date(event.created_at).toLocaleTimeString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+
           <section className="panel panel-search">
             <h2>Search</h2>
             <label className="field">

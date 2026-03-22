@@ -166,9 +166,19 @@ button:disabled {
   color: #bbf7d0;
 }
 
+.badge-running {
+  background: rgba(22, 163, 74, 0.2);
+  color: #bbf7d0;
+}
+
 .badge-queue_full {
   background: rgba(234, 179, 8, 0.25);
   color: #facc15;
+}
+
+.badge-high {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fde68a;
 }
 
 .badge-idle {
@@ -176,8 +186,30 @@ button:disabled {
   color: #e5e7eb;
 }
 
+.badge-completed,
+.badge-cancelled,
+.badge-pending {
+  background: rgba(148, 163, 184, 0.2);
+  color: #e5e7eb;
+}
+
+.badge-paused {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fde68a;
+}
+
+.badge-failed,
+.badge-error {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fecaca;
+}
+
 .panel-search {
   min-height: 0;
+}
+
+.panel-job-detail {
+  margin-bottom: 1rem;
 }
 
 .results {
@@ -249,6 +281,18 @@ td a {
   border-radius: 0.75rem;
   padding: 0.8rem 0.9rem;
   background: rgba(7, 12, 26, 0.45);
+  width: 100%;
+  text-align: left;
+  margin: 0;
+}
+
+.job-card:hover {
+  border-color: rgba(129, 140, 248, 0.5);
+}
+
+.job-card-selected {
+  border-color: rgba(129, 140, 248, 0.8);
+  box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.3) inset;
 }
 
 .job-card-header {
@@ -275,6 +319,73 @@ td a {
   color: #9ca3af;
 }
 
+.job-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.job-actions {
+  display: flex;
+  gap: 0.6rem;
+  margin: 0.75rem 0;
+}
+
+.job-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.job-frontier,
+.job-events {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.65rem;
+  padding: 0.5rem;
+  background: rgba(7, 12, 26, 0.35);
+  margin-bottom: 0.75rem;
+}
+
+.frontier-row,
+.event-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.5rem 0.75rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid rgba(55, 65, 81, 0.45);
+}
+
+.frontier-row:last-child,
+.event-row:last-child {
+  border-bottom: none;
+}
+
+.frontier-depth {
+  color: #9ca3af;
+  font-size: 0.8rem;
+}
+
+.frontier-url,
+.event-url {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-size: 0.82rem;
+  color: #cbd5f5;
+}
+
+.event-message {
+  font-size: 0.82rem;
+}
+
+.event-row {
+  grid-template-columns: auto 1fr;
+  align-items: start;
+}
+
 @media (max-width: 800px) {
   .app {
     padding: 0.75rem;
@@ -294,6 +405,10 @@ td a {
 
   .main {
     order: 2;
+  }
+
+  .job-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

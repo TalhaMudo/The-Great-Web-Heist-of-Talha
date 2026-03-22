@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections import deque
 from datetime import datetime
 from typing import Dict, List
 
@@ -9,8 +10,8 @@ from pydantic import BaseModel
 
 from .crawler import crawler_service
 from .indexer import index_service
-from .models import CrawlJob, CrawlStats, JobStatus, summarize_jobs
-from .storage import init_db, load_jobs, load_pages, save_job
+from .models import CrawlJob, JobStatus, summarize_jobs
+from .storage import init_db, load_job_events, load_jobs, load_pages
 
 
 class IndexRequest(BaseModel):
@@ -35,8 +36,35 @@ class SearchResponse(BaseModel):
     results: List[SearchResult]
 
 
+class JobEventResponse(BaseModel):
+    created_at: str
+    level: str
+    message: str
+    url: str | None = None
+    depth: int | None = None
+
+
+class JobDetailResponse(BaseModel):
+    id: str
+    origin_url: str
+    max_depth: int
+    created_at: str
+    updated_at: str
+    status: str
+    error_message: str | None = None
+    rate_limit_per_sec: float
+    stats: Dict[str, object]
+    visited_count: int
+    frontier_count: int
+    frontier_preview: List[Dict[str, object]]
+    recent_events: List[JobEventResponse]
+
+
 class MetricsResponse(BaseModel):
     processed_urls: int
+    discovered_urls: int
+    duplicate_urls: int
+    failed_urls: int
     queued_urls: int
     queue_max: int
     backpressure_state: str
@@ -66,8 +94,8 @@ async def index(request: IndexRequest) -> IndexResponse:
 
 
 @app.get("/search", response_model=SearchResponse)
-async def search(query: str) -> SearchResponse:
-    raw_results = index_service.search(query)
+async def search(query: str, limit: int | None = None) -> SearchResponse:
+    raw_results = index_service.search(query, limit=limit)
     results = [
         SearchResult(
             relevant_url=url,
@@ -81,32 +109,79 @@ async def search(query: str) -> SearchResponse:
     return SearchResponse(results=results)
 
 
-@app.get("/jobs/{job_id}")
-async def get_job(job_id: str) -> Dict[str, object]:
-    job = crawler_service.get_job(job_id)
-    if job is None:
+def _serialize_job(job_id: str) -> JobDetailResponse:
+    ctx = crawler_service.get_job_context(job_id)
+    if ctx is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    return {
-        "id": job.id,
-        "origin_url": job.origin_url,
-        "max_depth": job.max_depth,
-        "created_at": job.created_at.isoformat(),
-        "status": job.status.value,
-        "error_message": job.error_message,
-        "stats": {
+    job = ctx.job
+    queue_items: deque[tuple[str, int, str]] = getattr(ctx.queue, "_queue", deque())
+    preview: List[Dict[str, object]] = []
+    for url, depth, origin_url in list(queue_items)[:20]:
+        preview.append({"url": url, "depth": depth, "origin_url": origin_url})
+    events = [
+        JobEventResponse(
+            created_at=created_at,
+            level=level,
+            message=message,
+            url=url or None,
+            depth=depth,
+        )
+        for created_at, level, message, url, depth in load_job_events(job_id, limit=150)
+    ]
+    return JobDetailResponse(
+        id=job.id,
+        origin_url=job.origin_url,
+        max_depth=job.max_depth,
+        created_at=job.created_at.isoformat(),
+        updated_at=job.updated_at.isoformat(),
+        status=job.status.value,
+        error_message=job.error_message,
+        rate_limit_per_sec=job.rate_limit_per_sec,
+        stats={
             "processed_urls": job.stats.processed_urls,
+            "discovered_urls": job.stats.discovered_urls,
+            "duplicate_urls": job.stats.duplicate_urls,
+            "failed_urls": job.stats.failed_urls,
             "queued_urls": job.stats.queued_urls,
             "queue_max": job.stats.queue_max,
             "active_workers": job.stats.active_workers,
             "backpressure_state": job.stats.backpressure_state,
         },
-    }
+        visited_count=len(ctx.visited),
+        frontier_count=len(ctx.frontier),
+        frontier_preview=preview,
+        recent_events=events,
+    )
+
+
+@app.get("/jobs/{job_id}", response_model=JobDetailResponse)
+async def get_job(job_id: str) -> JobDetailResponse:
+    return _serialize_job(job_id)
+
+
+@app.post("/jobs/{job_id}/pause", response_model=JobDetailResponse)
+async def pause_job(job_id: str) -> JobDetailResponse:
+    job = await crawler_service.pause_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _serialize_job(job.id)
+
+
+@app.post("/jobs/{job_id}/resume", response_model=JobDetailResponse)
+async def resume_job(job_id: str) -> JobDetailResponse:
+    job = await crawler_service.resume_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return _serialize_job(job.id)
 
 
 @app.get("/metrics", response_model=MetricsResponse)
 async def metrics() -> MetricsResponse:
     return MetricsResponse(
         processed_urls=crawler_service.global_stats.processed_urls,
+        discovered_urls=crawler_service.global_stats.discovered_urls,
+        duplicate_urls=crawler_service.global_stats.duplicate_urls,
+        failed_urls=crawler_service.global_stats.failed_urls,
         queued_urls=crawler_service.global_stats.queued_urls,
         queue_max=crawler_service.global_stats.queue_max,
         backpressure_state=crawler_service.global_stats.backpressure_state,
