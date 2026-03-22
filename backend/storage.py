@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Set, Tuple
 
-from .models import CrawlJob, CrawlStats, JobStatus
+from .models import CrawlJob, CrawlStats, EmbeddingJobRecord, JobStatus
 
 DB_PATH = Path(__file__).resolve().parent.parent / "crawler.db"
 
@@ -95,6 +95,37 @@ def init_db() -> None:
                 message TEXT NOT NULL,
                 url TEXT,
                 depth INTEGER
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS page_embeddings (
+                url TEXT PRIMARY KEY,
+                origin_url TEXT NOT NULL,
+                depth INTEGER NOT NULL,
+                title TEXT,
+                model_name TEXT NOT NULL,
+                vector_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS embedding_jobs (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                rate_limit_per_sec REAL NOT NULL DEFAULT 1.0,
+                max_pages INTEGER,
+                total_pages INTEGER NOT NULL DEFAULT 0,
+                embedded_pages INTEGER NOT NULL DEFAULT 0,
+                failed_pages INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                pending_urls_json TEXT NOT NULL DEFAULT '[]'
             )
             """
         )
@@ -359,6 +390,198 @@ def load_jobs() -> List[CrawlJob]:
                 )
             )
         return jobs
+    finally:
+        conn.close()
+
+
+def save_page_embedding(
+    url: str,
+    origin_url: str,
+    depth: int,
+    title: str,
+    model_name: str,
+    vector_json: str,
+) -> None:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT OR REPLACE INTO page_embeddings (url, origin_url, depth, title, model_name, vector_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (url, origin_url, depth, title, model_name, vector_json, datetime.utcnow().isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_page_embeddings() -> List[Tuple[str, str, int, str, str, str]]:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT url, origin_url, depth, title, model_name, vector_json FROM page_embeddings")
+        rows = cur.fetchall()
+        return [(str(u), str(o), int(d), str(t or ""), str(m), str(v)) for u, o, d, t, m, v in rows]
+    finally:
+        conn.close()
+
+
+def load_embedding_targets(
+    model_name: str,
+    limit: int | None,
+    only_missing: bool = True,
+) -> List[Tuple[str, str, int, str, str]]:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        if only_missing:
+            query = """
+                SELECT p.url, p.origin_url, p.depth, p.title, p.body_snippet
+                FROM pages p
+                LEFT JOIN page_embeddings e ON p.url = e.url AND e.model_name = ?
+                WHERE e.url IS NULL
+                ORDER BY p.depth ASC, p.url ASC
+            """
+            params: Tuple[object, ...] = (model_name,)
+        else:
+            query = """
+                SELECT p.url, p.origin_url, p.depth, p.title, p.body_snippet
+                FROM pages p
+                ORDER BY p.depth ASC, p.url ASC
+            """
+            params = tuple()
+        if limit is not None:
+            query += " LIMIT ?"
+            params = (*params, limit)
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        return [(str(u), str(o), int(d), str(t or ""), str(b or "")) for (u, o, d, t, b) in rows]
+    finally:
+        conn.close()
+
+
+def save_embedding_job(job: EmbeddingJobRecord) -> None:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT OR REPLACE INTO embedding_jobs (
+                id,
+                created_at,
+                updated_at,
+                status,
+                model_name,
+                rate_limit_per_sec,
+                max_pages,
+                total_pages,
+                embedded_pages,
+                failed_pages,
+                error_message,
+                pending_urls_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                job.id,
+                job.created_at.isoformat(),
+                job.updated_at.isoformat(),
+                job.status.value,
+                job.model_name,
+                job.rate_limit_per_sec,
+                job.max_pages,
+                job.total_pages,
+                job.embedded_pages,
+                job.failed_pages,
+                job.error_message,
+                job.pending_urls_json,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_embedding_jobs() -> List[EmbeddingJobRecord]:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                id,
+                created_at,
+                updated_at,
+                status,
+                model_name,
+                rate_limit_per_sec,
+                max_pages,
+                total_pages,
+                embedded_pages,
+                failed_pages,
+                error_message,
+                pending_urls_json
+            FROM embedding_jobs
+            ORDER BY created_at DESC
+            """
+        )
+        rows = cur.fetchall()
+        jobs: List[EmbeddingJobRecord] = []
+        for (
+            job_id,
+            created_at,
+            updated_at,
+            status,
+            model_name,
+            rate_limit_per_sec,
+            max_pages,
+            total_pages,
+            embedded_pages,
+            failed_pages,
+            error_message,
+            pending_urls_json,
+        ) in rows:
+            jobs.append(
+                EmbeddingJobRecord(
+                    id=str(job_id),
+                    created_at=datetime.fromisoformat(str(created_at)),
+                    updated_at=datetime.fromisoformat(str(updated_at)),
+                    status=JobStatus(str(status)),
+                    model_name=str(model_name),
+                    rate_limit_per_sec=float(rate_limit_per_sec or 1.0),
+                    max_pages=int(max_pages) if max_pages is not None else None,
+                    total_pages=int(total_pages or 0),
+                    embedded_pages=int(embedded_pages or 0),
+                    failed_pages=int(failed_pages or 0),
+                    error_message=str(error_message) if error_message is not None else None,
+                    pending_urls_json=str(pending_urls_json or "[]"),
+                )
+            )
+        return jobs
+    finally:
+        conn.close()
+
+
+def count_pages() -> int:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM pages")
+        row = cur.fetchone()
+        return int(row[0] if row and row[0] is not None else 0)
+    finally:
+        conn.close()
+
+
+def count_page_embeddings(model_name: str) -> int:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM page_embeddings WHERE model_name = ?", (model_name,))
+        row = cur.fetchone()
+        return int(row[0] if row and row[0] is not None else 0)
     finally:
         conn.close()
 

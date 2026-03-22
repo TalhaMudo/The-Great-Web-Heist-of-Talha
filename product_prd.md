@@ -8,9 +8,11 @@ Building search engines is usually out of reach for a single engineer, but AI-as
 
 - **Index** web content starting from an origin URL up to depth `k`, never visiting the same page twice for a job.
 - **Search** previously indexed pages using a simple text-based relevancy heuristic, returning triples `(relevant_url, origin_url, depth)`.
+- **Semantic search** support over crawled pages using embedding vectors (`all-MiniLM-L6-v2`) while preserving the existing classic search.
 - **Live behavior**: allow search while indexing is running so new pages appear in results as soon as they are processed.
 - **Visibility**: provide a React dashboard that exposes crawl progress, queue depth, backpressure state, and job list.
 - **Local persistence**: store a lightweight snapshot of pages and jobs on disk so that search can resume after a restart.
+- **Embedding operations**: provide a separate UI mode to start/pause/resume embedding jobs with speed and max-page controls.
 - **AI-friendly design**: keep the crawler and indexer logic explicit and understandable, avoiding “black box” scraping libraries.
 
 #### Non-goals
@@ -24,8 +26,10 @@ Building search engines is usually out of reach for a single engineer, but AI-as
 
 - **As a student**, I can enter an origin URL and depth `k` in the UI and start an indexing job, so I can see how the crawler explores the web graph.
 - **As a student**, I can run queries in the search panel while a crawl is in progress and see newly indexed pages appear without restarting the search service.
+- **As a student**, I can compare classical and semantic results for the same query in side-by-side tables.
 - **As a student**, I can monitor the dashboard to understand how queue depth, processed URL count, and backpressure state change over time as the crawler runs.
 - **As a student**, I can restart the backend and immediately search previously indexed pages because they were persisted locally.
+- **As a student**, I can open an Embeddings page, tune embedding speed/max pages, and monitor `% embedded` in real time.
 - **As an instructor**, I can point at the dashboard and code to explain concurrency (worker pool, queue), backpressure (bounded queue), and uniqueness (visited set).
 
 #### Functional requirements
@@ -41,6 +45,13 @@ Building search engines is usually out of reach for a single engineer, but AI-as
   - Uses an in-memory inverted index built from page titles and body text tokens.
   - Scores pages by aggregate term frequency for query tokens and sorts descending.
   - Reads directly from the current in-memory index so queries reflect pages as soon as they are indexed.
+  - `GET /search/semantic?query=...` returns semantic matches from persisted page embeddings with similarity scores.
+
+- **Embedding job endpoints**
+  - `POST /embeddings/jobs/start` starts a manual embedding run with `{ rate_limit_per_sec, max_pages }`.
+  - `POST /embeddings/jobs/{job_id}/pause|resume` controls active embedding jobs.
+  - `POST /embeddings/jobs/{job_id}/rate-limit` updates embedding speed during runtime.
+  - `GET /embeddings/jobs` and `GET /embeddings/jobs/{job_id}` expose embedding progress and status.
 
 - **Status/metrics endpoints**
   - `GET /jobs/{job_id}` returns job metadata and per-job statistics (status, processed URLs, queue depth estimate, backpressure state).
@@ -48,17 +59,19 @@ Building search engines is usually out of reach for a single engineer, but AI-as
 
 - **React UI**
   - **Index control panel**: origin+depth form, “Start Indexing” button, and active job id display.
-  - **Search panel**: query input, results table with clickable URLs and metadata.
+  - **Search panel**: query input with side-by-side classical and semantic result tables.
+  - **Embeddings panel**: manual embedding controls (start/pause/resume, speed, max-page limit) and live progress cards.
   - **System dashboard**: live metrics cards and jobs table, auto-refreshing every few seconds.
 
 - **Persistence**
   - Store pages in a local SQLite database (via Python `sqlite3` stdlib) with columns `(url, origin_url, depth, title, body_snippet)`.
   - Store job metadata `(id, origin_url, max_depth, created_at, status)` in the same DB.
+  - Store semantic vectors in `page_embeddings` and embedding-job metadata in `embedding_jobs`.
   - On startup, rebuild the in-memory index from stored pages and repopulate the job list from stored jobs.
 
 #### Constraints
 
-- Backend implemented in **Python**, using only **standard library** modules for HTTP requests, HTML parsing, concurrency, and persistence (`urllib`, `html.parser`, `asyncio`, `sqlite3`).
+- Backend implemented in **Python**; crawling/indexing core remains on standard-library modules (`urllib`, `html.parser`, `asyncio`, `sqlite3`) and semantic search adds a model dependency (`sentence-transformers`).
 - React frontend implemented with **Vite + React + TypeScript**, running on `localhost`, proxying API calls to the Python backend.
 - Single-process, single-machine design: concurrency is implemented with `asyncio` tasks and a bounded queue, not multiple OS processes or machines.
 

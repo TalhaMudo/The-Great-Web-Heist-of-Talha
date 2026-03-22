@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from .crawler import crawler_service
 from .indexer import index_service
 from .models import CrawlJob, JobStatus, summarize_jobs
+from .semantic_index import semantic_index_service
 from .storage import init_db, load_job_events, load_jobs, load_pages
 
 
@@ -35,6 +36,29 @@ class SearchResult(BaseModel):
 
 class SearchResponse(BaseModel):
     results: List[SearchResult]
+
+
+class EmbeddingStartRequest(BaseModel):
+    rate_limit_per_sec: float = 1.0
+    max_pages: int | None = None
+
+
+class EmbeddingRateLimitRequest(BaseModel):
+    rate_limit_per_sec: float
+
+
+class EmbeddingStatusResponse(BaseModel):
+    updated_at: str
+    status: str
+    model_name: str
+    rate_limit_per_sec: float
+    max_pages: int | None = None
+    total_pages: int
+    embedded_pages: int
+    failed_pages: int
+    remaining_pages: int
+    progress_percent: float
+    error_message: str | None = None
 
 
 class JobEventResponse(BaseModel):
@@ -120,6 +144,71 @@ async def search(query: str, limit: int | None = None) -> SearchResponse:
         for url, origin_url, depth, score, title in raw_results
     ]
     return SearchResponse(results=results)
+
+
+@app.get("/search/semantic", response_model=SearchResponse)
+async def semantic_search(query: str, limit: int | None = None) -> SearchResponse:
+    raw_results = await semantic_index_service.search(query, limit=limit)
+    results = [
+        SearchResult(
+            relevant_url=url,
+            origin_url=origin_url,
+            depth=depth,
+            score=score,
+            title=title or None,
+        )
+        for url, origin_url, depth, score, title in raw_results
+    ]
+    return SearchResponse(results=results)
+
+
+async def _serialize_embedding_status() -> EmbeddingStatusResponse:
+    status = await semantic_index_service.get_engine_status()
+    return EmbeddingStatusResponse(
+        updated_at=status.updated_at.isoformat(),
+        status=status.status,
+        model_name=status.model_name,
+        rate_limit_per_sec=status.rate_limit_per_sec,
+        max_pages=status.max_pages,
+        total_pages=status.total_pages,
+        embedded_pages=status.embedded_pages,
+        failed_pages=status.failed_pages,
+        remaining_pages=status.remaining_pages,
+        progress_percent=status.progress_percent,
+        error_message=status.error_message,
+    )
+
+
+@app.get("/embeddings/status", response_model=EmbeddingStatusResponse)
+async def embedding_status() -> EmbeddingStatusResponse:
+    return await _serialize_embedding_status()
+
+
+@app.post("/embeddings/start", response_model=EmbeddingStatusResponse)
+async def start_embedding_engine(request: EmbeddingStartRequest) -> EmbeddingStatusResponse:
+    if request.rate_limit_per_sec <= 0:
+        raise HTTPException(status_code=400, detail="rate_limit_per_sec must be positive")
+    if request.max_pages is not None and request.max_pages <= 0:
+        raise HTTPException(status_code=400, detail="max_pages must be positive")
+    await semantic_index_service.start_engine(
+        rate_limit_per_sec=request.rate_limit_per_sec,
+        max_pages=request.max_pages,
+    )
+    return await _serialize_embedding_status()
+
+
+@app.post("/embeddings/pause", response_model=EmbeddingStatusResponse)
+async def pause_embedding_engine() -> EmbeddingStatusResponse:
+    await semantic_index_service.pause_engine()
+    return await _serialize_embedding_status()
+
+
+@app.post("/embeddings/rate-limit", response_model=EmbeddingStatusResponse)
+async def update_embedding_engine_rate_limit(request: EmbeddingRateLimitRequest) -> EmbeddingStatusResponse:
+    if request.rate_limit_per_sec <= 0:
+        raise HTTPException(status_code=400, detail="rate_limit_per_sec must be positive")
+    await semantic_index_service.update_rate_limit(request.rate_limit_per_sec)
+    return await _serialize_embedding_status()
 
 
 def _serialize_job(job_id: str) -> JobDetailResponse:
@@ -243,4 +332,5 @@ async def on_startup() -> None:
 
     for job in load_jobs():
         crawler_service.register_job(job)
+    await semantic_index_service.initialize()
 

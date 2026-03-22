@@ -72,8 +72,22 @@ type SearchResult = {
   title?: string | null;
 };
 
+type EmbeddingStatus = {
+  updated_at: string;
+  status: string;
+  model_name: string;
+  rate_limit_per_sec: number;
+  max_pages?: number | null;
+  total_pages: number;
+  embedded_pages: number;
+  failed_pages: number;
+  remaining_pages: number;
+  progress_percent: number;
+  error_message?: string | null;
+};
+
 export const App: React.FC = () => {
-  const [viewMode, setViewMode] = useState<"crawler" | "search">("crawler");
+  const [viewMode, setViewMode] = useState<"crawler" | "search" | "embeddings">("crawler");
   const [origin, setOrigin] = useState("");
   const [depth, setDepth] = useState(2);
   const [maxUrlsToVisit, setMaxUrlsToVisit] = useState("500");
@@ -83,12 +97,18 @@ export const App: React.FC = () => {
   const [selectedJob, setSelectedJob] = useState<JobDetail | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [classicResults, setClassicResults] = useState<SearchResult[]>([]);
+  const [semanticResults, setSemanticResults] = useState<SearchResult[]>([]);
   const [isIndexing, setIsIndexing] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isMutatingJob, setIsMutatingJob] = useState(false);
   const [globalQueueLimitInput, setGlobalQueueLimitInput] = useState("1000");
   const [jobRateInputs, setJobRateInputs] = useState<Record<string, string>>({});
+  const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatus | null>(null);
+  const [embeddingRateLimit, setEmbeddingRateLimit] = useState("1.0");
+  const [embeddingMaxPages, setEmbeddingMaxPages] = useState("500");
+  const [isMutatingEmbeddingJob, setIsMutatingEmbeddingJob] = useState(false);
 
   useEffect(() => {
     const fetchMetrics = () => {
@@ -137,6 +157,23 @@ export const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [selectedJobId]);
 
+  useEffect(() => {
+    const fetchEmbeddingStatus = () => {
+      fetch("/embeddings/status")
+        .then((res) => res.json())
+        .then((data: EmbeddingStatus) => {
+          setEmbeddingStatus(data);
+          setEmbeddingRateLimit(String(data.rate_limit_per_sec));
+        })
+        .catch(() => {
+          /* ignore */
+        });
+    };
+    fetchEmbeddingStatus();
+    const interval = setInterval(fetchEmbeddingStatus, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
   const startIndex = async () => {
     setError(null);
     try {
@@ -165,37 +202,41 @@ export const App: React.FC = () => {
     }
   };
 
-  const runSearch = async () => {
+  const runSearch = async (): Promise<{ classic: SearchResult[]; semantic: SearchResult[] }> => {
     setError(null);
+    setIsSearching(true);
     try {
-      const res = await fetch(`/search?query=${encodeURIComponent(query)}`);
-      if (!res.ok) {
-        const data = await res.json();
+      const [classicRes, semanticRes] = await Promise.all([
+        fetch(`/search?query=${encodeURIComponent(query)}`),
+        fetch(`/search/semantic?query=${encodeURIComponent(query)}`),
+      ]);
+      if (!classicRes.ok || !semanticRes.ok) {
+        const data = classicRes.ok ? await semanticRes.json() : await classicRes.json();
         throw new Error(data.detail ?? "Search failed");
       }
-      const data = await res.json();
-      setResults(data.results ?? []);
+      const [classicData, semanticData] = await Promise.all([classicRes.json(), semanticRes.json()]);
+      const classic = classicData.results ?? [];
+      const semantic = semanticData.results ?? [];
+      setClassicResults(classic);
+      setSemanticResults(semantic);
+      return { classic, semantic };
     } catch (e: any) {
       setError(e.message ?? String(e));
+      return { classic: [], semantic: [] };
+    } finally {
+      setIsSearching(false);
     }
   };
 
   const runFeelingLucky = async () => {
     setError(null);
     try {
-      const res = await fetch(`/search?query=${encodeURIComponent(query)}`);
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail ?? "Search failed");
-      }
-      const data = await res.json();
-      const nextResults: SearchResult[] = data.results ?? [];
-      setResults(nextResults);
-      if (nextResults.length === 0) {
+      const searched = await runSearch();
+      if (searched.classic.length === 0) {
         throw new Error("No results found for this query.");
       }
-      const randomIdx = Math.floor(Math.random() * nextResults.length);
-      const lucky = nextResults[randomIdx];
+      const randomIdx = Math.floor(Math.random() * searched.classic.length);
+      const lucky = searched.classic[randomIdx];
       if (!lucky?.relevant_url) {
         throw new Error("No valid URL found in search results.");
       }
@@ -226,6 +267,71 @@ export const App: React.FC = () => {
     }
   };
 
+  const startEmbedding = async () => {
+    setError(null);
+    try {
+      setIsMutatingEmbeddingJob(true);
+      const res = await fetch("/embeddings/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rate_limit_per_sec: Number(embeddingRateLimit),
+          max_pages: embeddingMaxPages ? Number(embeddingMaxPages) : null,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail ?? "Failed to start embedding engine");
+      }
+      const status: EmbeddingStatus = await res.json();
+      setEmbeddingStatus(status);
+    } catch (e: any) {
+      setError(e.message ?? String(e));
+    } finally {
+      setIsMutatingEmbeddingJob(false);
+    }
+  };
+
+  const pauseEmbedding = async () => {
+    setError(null);
+    try {
+      setIsMutatingEmbeddingJob(true);
+      const res = await fetch("/embeddings/pause", { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail ?? "Failed to pause embedding engine");
+      }
+      const status: EmbeddingStatus = await res.json();
+      setEmbeddingStatus(status);
+    } catch (e: any) {
+      setError(e.message ?? String(e));
+    } finally {
+      setIsMutatingEmbeddingJob(false);
+    }
+  };
+
+  const updateEmbeddingRateLimit = async () => {
+    setError(null);
+    try {
+      setIsMutatingEmbeddingJob(true);
+      const res = await fetch("/embeddings/rate-limit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rate_limit_per_sec: Number(embeddingRateLimit) }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail ?? "Failed to update embedding speed");
+      }
+      const status: EmbeddingStatus = await res.json();
+      setEmbeddingStatus(status);
+    } catch (e: any) {
+      setError(e.message ?? String(e));
+    } finally {
+      setIsMutatingEmbeddingJob(false);
+    }
+  };
+
   const searchPanel = (
     <section className="panel panel-search panel-search-upgraded">
       <div className="search-header">
@@ -248,45 +354,163 @@ export const App: React.FC = () => {
         />
       </label>
       <div className="search-actions">
-        <button onClick={runSearch} disabled={!query}>
+        <button onClick={runSearch} disabled={!query || isSearching}>
           Search Indexed Pages
         </button>
-        <button className="button-secondary" onClick={runFeelingLucky} disabled={!query}>
+        <button className="button-secondary" onClick={runFeelingLucky} disabled={!query || isSearching}>
           I'm Feeling Lucky
         </button>
       </div>
-      <div className="results">
-        {results.length === 0 ? (
-          <p className="hint">No results yet. Try searching after indexing.</p>
-        ) : (
-          <table className="search-table">
-            <thead>
-              <tr>
-                <th style={{ width: "40%" }}>URL</th>
-                <th style={{ width: "25%" }}>Origin</th>
-                <th style={{ width: "8%" }}>Depth</th>
-                <th style={{ width: "10%" }}>Score</th>
-                <th style={{ width: "17%" }}>Title</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((r) => (
-                <tr key={`${r.relevant_url}-${r.depth}`}>
-                  <td className="url-cell">
-                    <a className="result-link" href={r.relevant_url} target="_blank" rel="noreferrer">
-                      {r.relevant_url}
-                    </a>
-                  </td>
-                  <td className="url-cell">{r.origin_url}</td>
-                  <td>{r.depth}</td>
-                  <td>{r.score?.toFixed(2)}</td>
-                  <td>{r.title}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <div className="dual-results-grid">
+        <div className="results-panel">
+          <h3>Classical Search</h3>
+          <div className="results">
+            {classicResults.length === 0 ? (
+              <p className="hint">No classical results yet.</p>
+            ) : (
+              <table className="search-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: "45%" }}>URL</th>
+                    <th style={{ width: "20%" }}>Origin</th>
+                    <th style={{ width: "8%" }}>Depth</th>
+                    <th style={{ width: "10%" }}>Score</th>
+                    <th style={{ width: "17%" }}>Title</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {classicResults.map((r) => (
+                    <tr key={`classic-${r.relevant_url}-${r.depth}`}>
+                      <td className="url-cell">
+                        <a className="result-link" href={r.relevant_url} target="_blank" rel="noreferrer">
+                          {r.relevant_url}
+                        </a>
+                      </td>
+                      <td className="url-cell">{r.origin_url}</td>
+                      <td>{r.depth}</td>
+                      <td>{r.score?.toFixed(2)}</td>
+                      <td>{r.title}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+        <div className="results-panel">
+          <h3>Semantic Search</h3>
+          <div className="results">
+            {semanticResults.length === 0 ? (
+              <p className="hint">No semantic results yet. Run the embedding engine first.</p>
+            ) : (
+              <table className="search-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: "45%" }}>URL</th>
+                    <th style={{ width: "20%" }}>Origin</th>
+                    <th style={{ width: "8%" }}>Depth</th>
+                    <th style={{ width: "10%" }}>Similarity</th>
+                    <th style={{ width: "17%" }}>Title</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {semanticResults.map((r) => (
+                    <tr key={`semantic-${r.relevant_url}-${r.depth}`}>
+                      <td className="url-cell">
+                        <a className="result-link" href={r.relevant_url} target="_blank" rel="noreferrer">
+                          {r.relevant_url}
+                        </a>
+                      </td>
+                      <td className="url-cell">{r.origin_url}</td>
+                      <td>{r.depth}</td>
+                      <td>{r.score?.toFixed(4)}</td>
+                      <td>{r.title}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
       </div>
+    </section>
+  );
+
+  const embeddingsPanel = (
+    <section className="panel panel-embeddings">
+      <h2>Embeddings Control</h2>
+      <p className="search-subtitle">
+        Generate semantic embeddings manually from already crawled pages with your selected speed and limit.
+      </p>
+      <div className="embedding-control-grid">
+        <label className="field">
+          <span>Model</span>
+          <input type="text" value="all-MiniLM-L6-v2" readOnly />
+        </label>
+        <label className="field">
+          <span>Embedding speed (pages/s)</span>
+          <input
+            type="number"
+            min={0.1}
+            step={0.1}
+            value={embeddingRateLimit}
+            onChange={(e) => setEmbeddingRateLimit(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>Max pages this run</span>
+          <input
+            type="number"
+            min={1}
+            value={embeddingMaxPages}
+            onChange={(e) => setEmbeddingMaxPages(e.target.value)}
+          />
+        </label>
+      </div>
+      <div className="search-actions">
+        <button onClick={startEmbedding} disabled={isMutatingEmbeddingJob}>
+          {embeddingStatus?.status === "running" ? "Embedding..." : "Start Embedding"}
+        </button>
+        <button
+          className="button-secondary"
+          onClick={pauseEmbedding}
+          disabled={!embeddingStatus || embeddingStatus.status !== "running" || isMutatingEmbeddingJob}
+        >
+          Pause
+        </button>
+        <button className="button-secondary" onClick={updateEmbeddingRateLimit} disabled={isMutatingEmbeddingJob}>
+          Update Speed
+        </button>
+      </div>
+      <div className="metrics-grid">
+        <div className="metric">
+          <span className="label">Embedding status</span>
+          <span className={`badge badge-${embeddingStatus?.status ?? "idle"}`}>{embeddingStatus?.status ?? "idle"}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Current progress</span>
+          <span className="value">
+            {embeddingStatus ? `${embeddingStatus.progress_percent.toFixed(1)}% of your sites are embedded` : "Loading..."}
+          </span>
+        </div>
+        <div className="metric">
+          <span className="label">Embedded pages</span>
+          <span className="value">{embeddingStatus?.embedded_pages ?? 0}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Remaining pages</span>
+          <span className="value">{embeddingStatus?.remaining_pages ?? 0}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Total crawled pages</span>
+          <span className="value">{embeddingStatus?.total_pages ?? 0}</span>
+        </div>
+        <div className="metric">
+          <span className="label">Failed this run</span>
+          <span className="value">{embeddingStatus?.failed_pages ?? 0}</span>
+        </div>
+      </div>
+      {embeddingStatus?.error_message && <p className="hint">Embedding engine error: {embeddingStatus.error_message}</p>}
     </section>
   );
 
@@ -312,12 +536,20 @@ export const App: React.FC = () => {
           >
             Search Mode
           </button>
+          <button
+            className={`mode-btn ${viewMode === "embeddings" ? "mode-btn-active" : ""}`}
+            onClick={() => setViewMode("embeddings")}
+            role="tab"
+            aria-selected={viewMode === "embeddings"}
+          >
+            Embeddings
+          </button>
         </div>
       </header>
 
       {error && <div className="error-banner">{error}</div>}
 
-      <main className={`layout ${viewMode === "search" ? "layout-search" : ""}`}>
+      <main className={`layout ${viewMode !== "crawler" ? "layout-search" : ""}`}>
         {viewMode === "crawler" && <div className="sidebar">
           <section className="panel">
             <h2>Index Control</h2>
@@ -525,7 +757,7 @@ export const App: React.FC = () => {
           </section>
         </div>}
 
-        <div className={`main ${viewMode === "search" ? "main-search" : ""}`}>
+        <div className={`main ${viewMode !== "crawler" ? "main-search" : ""}`}>
           {viewMode === "crawler" && <section className="panel panel-job-detail">
             <h2>Job Detail</h2>
             {!selectedJob ? (
@@ -622,6 +854,7 @@ export const App: React.FC = () => {
           </section>}
 
           {viewMode === "search" && searchPanel}
+          {viewMode === "embeddings" && embeddingsPanel}
         </div>
       </main>
     </div>

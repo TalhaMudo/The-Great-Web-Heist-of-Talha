@@ -41,6 +41,22 @@ class CrawlJob:
     stats: CrawlStats = field(default_factory=CrawlStats)
 
 
+@dataclass
+class EmbeddingJobRecord:
+    id: str
+    created_at: datetime
+    updated_at: datetime
+    status: JobStatus
+    model_name: str
+    rate_limit_per_sec: float = 1.0
+    max_pages: int | None = None
+    total_pages: int = 0
+    embedded_pages: int = 0
+    failed_pages: int = 0
+    error_message: Optional[str] = None
+    pending_urls_json: str = "[]"
+
+
 PageRecord = Tuple[str, str, int]
 IndexEntry = Tuple[str, str, int, float]
 
