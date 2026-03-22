@@ -183,10 +183,15 @@ export const App: React.FC = () => {
       const data = await res.json();
       const nextResults: SearchResult[] = data.results ?? [];
       setResults(nextResults);
-      if (nextResults.length === 0 || !nextResults[0].relevant_url) {
+      if (nextResults.length === 0) {
         throw new Error("No results found for this query.");
       }
-      window.open(nextResults[0].relevant_url, "_blank", "noopener,noreferrer");
+      const randomIdx = Math.floor(Math.random() * nextResults.length);
+      const lucky = nextResults[randomIdx];
+      if (!lucky?.relevant_url) {
+        throw new Error("No valid URL found in search results.");
+      }
+      window.open(lucky.relevant_url, "_blank", "noopener,noreferrer");
     } catch (e: any) {
       setError(e.message ?? String(e));
     }
