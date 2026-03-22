@@ -42,7 +42,8 @@ The dashboard allows:
 - pausing and resuming existing jobs,
 - changing **global queue limit** across all jobs,
 - changing **per-job request rate** live from each job card,
-- starting, pausing, and resuming **embedding jobs** with configurable embed speed and max-page limit,
+- starting and pausing a single **embedding engine** with configurable embed speed and max-page limit,
+- clearing all stored embeddings with confirmation when a full reset is needed,
 - inspecting detailed job state (frontier preview, counters, recent events),
 - viewing global metrics (processed/discovered/duplicates/failed, queue pressure, workers),
 - viewing embedding progress metrics (embedded/remaining/failed and `% embedded`).
@@ -57,7 +58,7 @@ The dashboard allows:
   - `job_visited` and `job_frontier` for resumable crawl state,
   - `job_events` for job timeline details,
   - `page_embeddings` for semantic vectors,
-  - `embedding_jobs` for resumable embedding job state.
+  - semantic engine runtime state in backend memory, with progress derived from DB counts.
 
 ## API Endpoints
 
@@ -96,23 +97,20 @@ The dashboard allows:
 
 ### Embeddings
 
-- `POST /embeddings/jobs/start`  
-  Starts a manual embedding job with configurable speed and max-page scope.
+- `GET /embeddings/status`  
+  Returns current embedding engine state and progress.
 
-- `GET /embeddings/jobs`  
-  Lists embedding jobs and progress.
+- `POST /embeddings/start`  
+  Starts (or continues) embedding missing pages with configurable speed and max-page scope.
 
-- `GET /embeddings/jobs/{job_id}`  
-  Returns full embedding job status and counters.
+- `POST /embeddings/pause`  
+  Pauses the current embedding engine run.
 
-- `POST /embeddings/jobs/{job_id}/pause`  
-  Pauses a running embedding job.
+- `POST /embeddings/rate-limit`  
+  Updates embedding speed (`pages/s`) for the engine.
 
-- `POST /embeddings/jobs/{job_id}/resume`  
-  Resumes a paused embedding job.
-
-- `POST /embeddings/jobs/{job_id}/rate-limit`  
-  Updates embedding speed (`pages/s`) for a job.
+- `POST /embeddings/clear`  
+  Deletes all stored embeddings so semantic indexing can be rebuilt from zero.
 
 ## Backpressure and Load Management
 

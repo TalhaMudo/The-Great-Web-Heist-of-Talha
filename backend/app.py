@@ -211,6 +211,12 @@ async def update_embedding_engine_rate_limit(request: EmbeddingRateLimitRequest)
     return await _serialize_embedding_status()
 
 
+@app.post("/embeddings/clear", response_model=EmbeddingStatusResponse)
+async def clear_embeddings() -> EmbeddingStatusResponse:
+    await semantic_index_service.clear_embeddings()
+    return await _serialize_embedding_status()
+
+
 def _serialize_job(job_id: str) -> JobDetailResponse:
     ctx = crawler_service.get_job_context(job_id)
     if ctx is None:

@@ -12,7 +12,7 @@ Building search engines is usually out of reach for a single engineer, but AI-as
 - **Live behavior**: allow search while indexing is running so new pages appear in results as soon as they are processed.
 - **Visibility**: provide a React dashboard that exposes crawl progress, queue depth, backpressure state, and job list.
 - **Local persistence**: store a lightweight snapshot of pages and jobs on disk so that search can resume after a restart.
-- **Embedding operations**: provide a separate UI mode to start/pause/resume embedding jobs with speed and max-page controls.
+- **Embedding operations**: provide a separate UI mode to control a single embedding engine (start/pause, speed, max-page scope) and reset embeddings when needed.
 - **AI-friendly design**: keep the crawler and indexer logic explicit and understandable, avoiding “black box” scraping libraries.
 
 #### Non-goals
@@ -47,11 +47,12 @@ Building search engines is usually out of reach for a single engineer, but AI-as
   - Reads directly from the current in-memory index so queries reflect pages as soon as they are indexed.
   - `GET /search/semantic?query=...` returns semantic matches from persisted page embeddings with similarity scores.
 
-- **Embedding job endpoints**
-  - `POST /embeddings/jobs/start` starts a manual embedding run with `{ rate_limit_per_sec, max_pages }`.
-  - `POST /embeddings/jobs/{job_id}/pause|resume` controls active embedding jobs.
-  - `POST /embeddings/jobs/{job_id}/rate-limit` updates embedding speed during runtime.
-  - `GET /embeddings/jobs` and `GET /embeddings/jobs/{job_id}` expose embedding progress and status.
+- **Embedding engine endpoints**
+  - `GET /embeddings/status` returns embedding progress and current engine state.
+  - `POST /embeddings/start` starts (or continues) embedding missing pages with `{ rate_limit_per_sec, max_pages }`.
+  - `POST /embeddings/pause` pauses active embedding work.
+  - `POST /embeddings/rate-limit` updates embedding speed during runtime.
+  - `POST /embeddings/clear` deletes all stored embeddings after explicit user confirmation in UI.
 
 - **Status/metrics endpoints**
   - `GET /jobs/{job_id}` returns job metadata and per-job statistics (status, processed URLs, queue depth estimate, backpressure state).
@@ -60,13 +61,13 @@ Building search engines is usually out of reach for a single engineer, but AI-as
 - **React UI**
   - **Index control panel**: origin+depth form, “Start Indexing” button, and active job id display.
   - **Search panel**: query input with side-by-side classical and semantic result tables.
-  - **Embeddings panel**: manual embedding controls (start/pause/resume, speed, max-page limit) and live progress cards.
+  - **Embeddings panel**: manual embedding controls (start/pause, speed, max-page limit, clear-all reset) and live progress cards.
   - **System dashboard**: live metrics cards and jobs table, auto-refreshing every few seconds.
 
 - **Persistence**
   - Store pages in a local SQLite database (via Python `sqlite3` stdlib) with columns `(url, origin_url, depth, title, body_snippet)`.
   - Store job metadata `(id, origin_url, max_depth, created_at, status)` in the same DB.
-  - Store semantic vectors in `page_embeddings` and embedding-job metadata in `embedding_jobs`.
+  - Store semantic vectors in `page_embeddings`; progress is derived from `pages` vs `page_embeddings`.
   - On startup, rebuild the in-memory index from stored pages and repopulate the job list from stored jobs.
 
 #### Constraints

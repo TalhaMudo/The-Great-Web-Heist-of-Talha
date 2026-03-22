@@ -8,7 +8,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Tuple
 
-from .storage import count_pages, count_page_embeddings, load_embedding_targets, load_page_embeddings, save_page_embedding
+from .storage import (
+    count_page_embeddings,
+    count_pages,
+    delete_page_embeddings,
+    load_embedding_targets,
+    load_page_embeddings,
+    save_page_embedding,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +99,20 @@ class SemanticIndexService:
     async def update_rate_limit(self, rate_limit_per_sec: float) -> EmbeddingEngineStatus:
         self._rate_limit_per_sec = rate_limit_per_sec
         self._updated_at = datetime.utcnow()
+        return await self.get_engine_status()
+
+    async def clear_embeddings(self) -> EmbeddingEngineStatus:
+        if self._task and not self._task.done():
+            self._task.cancel()
+            await asyncio.gather(self._task, return_exceptions=True)
+        delete_page_embeddings(DEFAULT_EMBEDDING_MODEL)
+        self._embeddings.clear()
+        self._meta.clear()
+        self._failed_pages = 0
+        self._error_message = None
+        self._status = "idle"
+        self._updated_at = datetime.utcnow()
+        self._task = None
         return await self.get_engine_status()
 
     async def search(self, query: str, limit: int | None = None) -> List[Tuple[str, str, int, float, str]]:

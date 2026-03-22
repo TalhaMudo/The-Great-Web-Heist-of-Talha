@@ -585,3 +585,18 @@ def count_page_embeddings(model_name: str) -> int:
     finally:
         conn.close()
 
+
+def delete_page_embeddings(model_name: str | None = None) -> int:
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        if model_name:
+            cur.execute("DELETE FROM page_embeddings WHERE model_name = ?", (model_name,))
+        else:
+            cur.execute("DELETE FROM page_embeddings")
+        deleted = int(cur.rowcount if cur.rowcount is not None else 0)
+        conn.commit()
+        return deleted
+    finally:
+        conn.close()
+

@@ -162,8 +162,12 @@ export const App: React.FC = () => {
       fetch("/embeddings/status")
         .then((res) => res.json())
         .then((data: EmbeddingStatus) => {
-          setEmbeddingStatus(data);
-          setEmbeddingRateLimit(String(data.rate_limit_per_sec));
+          setEmbeddingStatus((prev) => {
+            if (prev === null) {
+              setEmbeddingRateLimit(String(data.rate_limit_per_sec));
+            }
+            return data;
+          });
         })
         .catch(() => {
           /* ignore */
@@ -285,6 +289,7 @@ export const App: React.FC = () => {
       }
       const status: EmbeddingStatus = await res.json();
       setEmbeddingStatus(status);
+      setEmbeddingRateLimit(String(status.rate_limit_per_sec));
     } catch (e: any) {
       setError(e.message ?? String(e));
     } finally {
@@ -303,6 +308,7 @@ export const App: React.FC = () => {
       }
       const status: EmbeddingStatus = await res.json();
       setEmbeddingStatus(status);
+      setEmbeddingRateLimit(String(status.rate_limit_per_sec));
     } catch (e: any) {
       setError(e.message ?? String(e));
     } finally {
@@ -322,6 +328,31 @@ export const App: React.FC = () => {
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.detail ?? "Failed to update embedding speed");
+      }
+      const status: EmbeddingStatus = await res.json();
+      setEmbeddingStatus(status);
+      setEmbeddingRateLimit(String(status.rate_limit_per_sec));
+    } catch (e: any) {
+      setError(e.message ?? String(e));
+    } finally {
+      setIsMutatingEmbeddingJob(false);
+    }
+  };
+
+  const clearAllEmbeddings = async () => {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete all embeddings? This cannot be undone and semantic search will be empty until you embed again."
+    );
+    if (!confirmed) {
+      return;
+    }
+    setError(null);
+    try {
+      setIsMutatingEmbeddingJob(true);
+      const res = await fetch("/embeddings/clear", { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail ?? "Failed to clear embeddings");
       }
       const status: EmbeddingStatus = await res.json();
       setEmbeddingStatus(status);
@@ -481,6 +512,9 @@ export const App: React.FC = () => {
         <button className="button-secondary" onClick={updateEmbeddingRateLimit} disabled={isMutatingEmbeddingJob}>
           Update Speed
         </button>
+        <button className="button-secondary" onClick={clearAllEmbeddings} disabled={isMutatingEmbeddingJob}>
+          Delete All Embeddings
+        </button>
       </div>
       <div className="metrics-grid">
         <div className="metric">
@@ -492,6 +526,12 @@ export const App: React.FC = () => {
           <span className="value">
             {embeddingStatus ? `${embeddingStatus.progress_percent.toFixed(1)}% of your sites are embedded` : "Loading..."}
           </span>
+          <div className="progress-track" aria-label="Embedding progress">
+            <div
+              className="progress-fill"
+              style={{ width: `${Math.min(100, Math.max(0, embeddingStatus?.progress_percent ?? 0))}%` }}
+            />
+          </div>
         </div>
         <div className="metric">
           <span className="label">Embedded pages</span>
