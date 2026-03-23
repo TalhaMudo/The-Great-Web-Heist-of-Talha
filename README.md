@@ -1,5 +1,7 @@
 Crawler Project
+
 Github link: https://github.com/TalhaMudo/The-Great-Web-Heist-of-Talha
+
 This project implements a single-machine web crawler and keyword search engine with a live dashboard. It is designed to satisfy the assignment requirements around:
 
 - indexing from an origin URL up to depth `k`,
