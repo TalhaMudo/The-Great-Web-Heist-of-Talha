@@ -9,6 +9,8 @@ venv/
 
 # Frontend build outputs
 frontend/dist/
+node_modules/
+frontend/node_modules/
 
 # OS/editor noise
 .DS_Store
