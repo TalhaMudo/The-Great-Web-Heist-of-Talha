@@ -19,7 +19,7 @@ Building search engines is usually out of reach for a single engineer, but AI-as
 
 - Internet-scale crawling, cross-machine distribution, or strict guarantees about completeness of the web graph.
 - Production-grade search relevance (no BM25, no learning-to-rank; a simple token-based heuristic is sufficient).
-- Full politeness policies (robots.txt, per-domain rate scheduling); we only implement a global rate limiter.
+- Full politeness policies (robots.txt, per-domain rate scheduling); the current implementation focuses on global queue limiting plus per-job rate controls.
 - Strong security hardening (sandboxing, HTML sanitization) beyond what’s necessary for a localhost classroom demo.
 
 #### User stories
@@ -30,7 +30,7 @@ Building search engines is usually out of reach for a single engineer, but AI-as
 - **As a student**, I can monitor the dashboard to understand how queue depth, processed URL count, and backpressure state change over time as the crawler runs.
 - **As a student**, I can restart the backend and immediately search previously indexed pages because they were persisted locally.
 - **As a student**, I can open an Embeddings page, tune embedding speed/max pages, and monitor `% embedded` in real time.
-- **As an instructor**, I can point at the dashboard and code to explain concurrency (worker pool, queue), backpressure (bounded queue), and uniqueness (visited set).
+- **As an instructor**, I can point at the dashboard and code to explain concurrency (worker pool, queue), backpressure (global queue limit), and uniqueness (visited set).
 
 #### Functional requirements
 
@@ -38,7 +38,7 @@ Building search engines is usually out of reach for a single engineer, but AI-as
   - `POST /index` accepts `{ origin: string, k: number }`.
   - Spawns an asynchronous crawl job identified by `job_id`.
   - Enforces depth limit `k` and “never crawl the same URL twice per job” using a normalized URL visited set.
-  - Applies global backpressure using a bounded `asyncio.Queue` and a fixed worker count; when the queue is full, link discovery pauses and `backpressure_state` transitions to `"queue_full"`.
+  - Applies global backpressure using a shared global queue limit and a fixed worker count; when the limit is reached, link discovery pauses and `backpressure_state` transitions to `"queue_full"`.
 
 - **Search endpoint**
   - `GET /search?query=...` returns a list of results, each containing `(relevant_url, origin_url, depth, score, title)`.

@@ -89,9 +89,9 @@ type EmbeddingStatus = {
 export const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<"crawler" | "search" | "embeddings">("crawler");
   const [origin, setOrigin] = useState("");
-  const [depth, setDepth] = useState(2);
+  const [depthInput, setDepthInput] = useState("2");
   const [maxUrlsToVisit, setMaxUrlsToVisit] = useState("500");
-  const [rateLimit, setRateLimit] = useState(1.0);
+  const [rateLimitInput, setRateLimitInput] = useState("1.0");
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedJob, setSelectedJob] = useState<JobDetail | null>(null);
@@ -184,15 +184,36 @@ export const App: React.FC = () => {
   const startIndex = async () => {
     setError(null);
     try {
+      const trimmedDepth = depthInput.trim();
+      const parsedDepth = Number(trimmedDepth);
+      if (!trimmedDepth || !Number.isInteger(parsedDepth) || parsedDepth < 0 || parsedDepth > 8) {
+        throw new Error("Max depth (k) must be an integer between 0 and 8.");
+      }
+
+      const trimmedRate = rateLimitInput.trim();
+      const parsedRateLimit = Number(trimmedRate);
+      if (!trimmedRate || !Number.isFinite(parsedRateLimit) || parsedRateLimit <= 0) {
+        throw new Error("Crawler speed (req/s) must be a positive number.");
+      }
+
+      const trimmedMaxUrls = maxUrlsToVisit.trim();
+      const parsedMaxUrls = trimmedMaxUrls ? Number(trimmedMaxUrls) : null;
+      if (
+        trimmedMaxUrls &&
+        (!Number.isInteger(parsedMaxUrls) || parsedMaxUrls === null || parsedMaxUrls <= 0)
+      ) {
+        throw new Error("Max URLs to Visit must be a positive integer.");
+      }
+
       setIsIndexing(true);
       const res = await fetch("/index", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           origin,
-          k: depth,
-          max_urls_to_visit: maxUrlsToVisit ? Number(maxUrlsToVisit) : null,
-          rate_limit_per_sec: rateLimit,
+          k: parsedDepth,
+          max_urls_to_visit: parsedMaxUrls,
+          rate_limit_per_sec: parsedRateLimit,
         }),
       });
       if (!res.ok) {
@@ -401,7 +422,7 @@ export const App: React.FC = () => {
       </div>
       {!query && (
         <p className="hint">
-          Enter a query to search. Your crawled and embedded pages are ready, but search needs at least one keyword.
+          Enter a query to search.
         </p>
       )}
       <div className="dual-results-grid">
@@ -444,7 +465,7 @@ export const App: React.FC = () => {
           <h3>Semantic Search</h3>
           <div className="results">
             {semanticResults.length === 0 ? (
-              <p className="hint">No semantic results yet. Run the embedding engine first.</p>
+              <p className="hint">No semantic results yet. Run the embedding engine first if not.</p>
             ) : (
               <table className="search-table">
                 <thead>
@@ -623,8 +644,8 @@ export const App: React.FC = () => {
                 type="number"
                 min={0}
                 max={8}
-                value={depth}
-                onChange={(e) => setDepth(Number(e.target.value))}
+                value={depthInput}
+                onChange={(e) => setDepthInput(e.target.value)}
               />
             </label>
             <label className="field">
@@ -644,8 +665,8 @@ export const App: React.FC = () => {
                 type="number"
                 min={0.1}
                 step={0.1}
-                value={rateLimit}
-                onChange={(e) => setRateLimit(Number(e.target.value))}
+                value={rateLimitInput}
+                onChange={(e) => setRateLimitInput(e.target.value)}
               />
             </label>
             <button onClick={startIndex} disabled={!origin || isIndexing}>

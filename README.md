@@ -1,5 +1,5 @@
 Crawler Project
-
+Github link: https://github.com/TalhaMudo/The-Great-Web-Heist-of-Talha
 This project implements a single-machine web crawler and keyword search engine with a live dashboard. It is designed to satisfy the assignment requirements around:
 
 - indexing from an origin URL up to depth `k`,
@@ -65,7 +65,7 @@ The dashboard allows:
 ### Index/Search
 
 - `POST /index`  
-  Starts a new crawl job with origin URL, depth `k`, and optional initial rate limit.
+  Starts a new crawl job with origin URL, depth `k`, optional `max_urls_to_visit`, and optional initial rate limit.
 
 - `GET /search?query=...&limit=...`  
   Returns relevant indexed URLs.
