@@ -104,6 +104,7 @@ export const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isMutatingJob, setIsMutatingJob] = useState(false);
   const [globalQueueLimitInput, setGlobalQueueLimitInput] = useState("1000");
+  const [isEditingGlobalQueueLimit, setIsEditingGlobalQueueLimit] = useState(false);
   const [jobRateInputs, setJobRateInputs] = useState<Record<string, string>>({});
   const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatus | null>(null);
   const [embeddingRateLimit, setEmbeddingRateLimit] = useState("1.0");
@@ -116,7 +117,9 @@ export const App: React.FC = () => {
         .then((res) => res.json())
         .then((data: Metrics) => {
           setMetrics(data);
-          setGlobalQueueLimitInput(String(data.queue_max));
+          if (!isEditingGlobalQueueLimit) {
+            setGlobalQueueLimitInput(String(data.queue_max));
+          }
           setJobRateInputs((prev) => {
             const next = { ...prev };
             for (const job of data.jobs_summary) {
@@ -137,7 +140,7 @@ export const App: React.FC = () => {
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 2000);
     return () => clearInterval(interval);
-  }, [selectedJobId]);
+  }, [selectedJobId, isEditingGlobalQueueLimit]);
 
   useEffect(() => {
     if (!selectedJobId) {
@@ -379,7 +382,11 @@ export const App: React.FC = () => {
         <input
           className="search-input"
           type="text"
-          placeholder="search terms"
+          placeholder={
+            embeddingStatus?.embedded_pages && embeddingStatus.embedded_pages > 0
+              ? "Type a keyword or phrase to search indexed + embedded pages"
+              : "Type a keyword or phrase to search indexed pages"
+          }
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -392,6 +399,11 @@ export const App: React.FC = () => {
           I'm Feeling Lucky
         </button>
       </div>
+      {!query && (
+        <p className="hint">
+          Enter a query to search. Your crawled and embedded pages are ready, but search needs at least one keyword.
+        </p>
+      )}
       <div className="dual-results-grid">
         <div className="results-panel">
           <h3>Classical Search</h3>
@@ -516,6 +528,9 @@ export const App: React.FC = () => {
           Delete All Embeddings
         </button>
       </div>
+      <p className="hint">
+        After clicking Start Embedding, initialization can take around 10 seconds before status and progress update.
+      </p>
       <div className="metrics-grid">
         <div className="metric">
           <span className="label">Embedding status</span>
@@ -649,6 +664,8 @@ export const App: React.FC = () => {
                   min={1}
                   value={globalQueueLimitInput}
                   onChange={(e) => setGlobalQueueLimitInput(e.target.value)}
+                  onFocus={() => setIsEditingGlobalQueueLimit(true)}
+                  onBlur={() => setIsEditingGlobalQueueLimit(false)}
                 />
                 <button
                   onClick={async () => {
